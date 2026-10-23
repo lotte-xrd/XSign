@@ -24,9 +24,11 @@ struct ImportCertificateView: View {
                     }
                 }
 
-                Section(L.tr("importcert.data")) {
+                Section {
                     SecureField(L.tr("importcert.password"), text: $password)
                     TextField(L.tr("importcert.nickname"), text: $nickname)
+                } header: {
+                    Text(L.tr("importcert.data"))
                 } footer: {
                     Text(L.tr("importcert.keychain"))
                 }

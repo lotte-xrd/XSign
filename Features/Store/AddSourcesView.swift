@@ -16,7 +16,7 @@ struct AddSourcesView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section(L.tr("addsource.urls")) {
+                Section {
                     TextEditor(text: $text)
                         .frame(minHeight: 90)
                         .font(.callout.monospaced())
@@ -25,6 +25,8 @@ struct AddSourcesView: View {
                     Button {
                         if let s = UIPasteboard.general.string { text = text.isEmpty ? s : text + "\n" + s }
                     } label: { Label(L.tr("addsource.paste"), systemImage: "doc.on.clipboard") }
+                } header: {
+                    Text(L.tr("addsource.urls"))
                 } footer: {
                     Text(L.tr("addsource.hint"))
                 }

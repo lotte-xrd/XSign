@@ -67,7 +67,7 @@ struct ActiveDownloadRow: View {
             } label: {
                 Image(systemName: task.state == .paused ? "arrow.clockwise" : "pause").font(.caption)
             }
-            .buttonStyle(.bordered).buttonBorderShape(.circle).tint(Color.graphite)
+            .buttonStyle(.bordered).tint(Color.graphite)
         }
     }
 
