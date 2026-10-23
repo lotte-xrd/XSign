@@ -1,12 +1,19 @@
 import SwiftUI
 import UIKit
 
+/// Resultado de adicionar cada fonte. Não usamos `Result` porque o seu tipo de
+/// erro precisa conformar a `Error`, e aqui a falha é só uma mensagem.
+private enum AddResult {
+    case success(Source)
+    case failure(String)
+}
+
 struct AddSourcesView: View {
     @EnvironmentObject private var app: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
     @State private var working = false
-    @State private var results: [Result<Source, String>] = []
+    @State private var results: [AddResult] = []
 
     private var urls: [URL] {
         text.split(whereSeparator: \.isNewline)

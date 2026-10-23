@@ -15,11 +15,10 @@ final class DownloadManager: ObservableObject {
 
     /// Inicia o download de um app de uma fonte.
     func start(name: String, url: URL) {
-        var task = DownloadTask(url: url, name: name, state: .running)
+        let task = DownloadTask(url: url, name: name, state: .running)
         tasks.insert(task, at: 0)
         let id = task.id
         handles[id] = Task { await run(id: id, url: url) }
-        _ = task
     }
 
     func pause(_ id: UUID) {
