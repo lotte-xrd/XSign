@@ -5,7 +5,12 @@ import SwiftUI
 /// `Text("key")` do SwiftUI usa o bundle principal, que não acompanha a troca
 /// em runtime. Por isso usamos `L.tr("key")`, que lê do `.lproj` do idioma
 /// escolhido, e recriamos a árvore com `.id(language.code)` na raiz.
-@MainActor
+///
+/// Observação de concorrência: a classe NÃO é `@MainActor` e `L.tr` é uma função
+/// livre. Assim ela pode ser chamada de qualquer contexto — inclusive de
+/// `errorDescription`, de propriedades de enums e de closures de serviços — sem
+/// erro de isolamento de ator. As mutações de `code` vêm sempre da interface
+/// (main thread).
 final class LocalizationManager: ObservableObject {
     static let shared = LocalizationManager()
 
@@ -13,12 +18,11 @@ final class LocalizationManager: ObservableObject {
     @Published var code: String {
         didSet {
             UserDefaults.standard.set(code, forKey: Self.key)
-            bundle = Self.bundle(for: resolvedCode)
+            apply()
         }
     }
 
     private static let key = "appLanguage"
-    private var bundle: Bundle
 
     /// Todos os idiomas planejados. `shipping` marca os que já têm tradução.
     static let all: [Language] = [
@@ -39,9 +43,8 @@ final class LocalizationManager: ObservableObject {
     ]
 
     private init() {
-        let saved = UserDefaults.standard.string(forKey: Self.key) ?? "system"
-        code = saved
-        bundle = Self.bundle(for: Self.resolve(saved))
+        code = UserDefaults.standard.string(forKey: Self.key) ?? "system"
+        apply()
     }
 
     var locale: Locale { code == "system" ? .autoupdatingCurrent : Locale(identifier: resolvedCode) }
@@ -49,16 +52,14 @@ final class LocalizationManager: ObservableObject {
 
     private var resolvedCode: String { Self.resolve(code) }
 
-    func tr(_ key: String, _ args: [CVarArg] = []) -> String {
-        let format = bundle.localizedString(forKey: key, value: key, table: nil)
-        return args.isEmpty ? format : String(format: format, locale: locale, arguments: args)
+    /// Atualiza o cache lido por `L.tr`.
+    private func apply() {
+        L.bundle = Self.bundle(for: resolvedCode)
+        L.locale = locale
     }
 
     private static func resolve(_ code: String) -> String {
-        if code == "system" {
-            return Bundle.main.preferredLocalizations.first ?? "en"
-        }
-        return code
+        code == "system" ? (Bundle.main.preferredLocalizations.first ?? "en") : code
     }
 
     private static func bundle(for code: String) -> Bundle {
@@ -84,12 +85,15 @@ struct Language: Identifiable, Hashable {
 }
 
 /// Atalho global para traduzir. Uso: `L.tr("sign.button")`.
+///
+/// Função livre (não isolada a ator), para ser chamada de qualquer lugar. O
+/// bundle e o locale são atualizados pelo `LocalizationManager` a cada troca.
 enum L {
-    @MainActor static func tr(_ key: String, _ args: CVarArg...) -> String {
-        LocalizationManager.shared.tr(key, args)
+    static var bundle: Bundle = .main
+    static var locale: Locale = .autoupdatingCurrent
+
+    static func tr(_ key: String, _ args: CVarArg...) -> String {
+        let format = bundle.localizedString(forKey: key, value: key, table: nil)
+        return args.isEmpty ? format : String(format: format, locale: locale, arguments: args)
     }
 }
-
-// `L.tr` é chamado de contextos síncronos não isolados (ex.: computed properties
-// de enums). Mantemos a verificação de concorrência em "minimal" no projeto; o
-// acesso real ao Bundle acontece sempre a partir das views, na main actor.

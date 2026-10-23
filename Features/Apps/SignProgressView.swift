@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct SignProgressView: View {
     @EnvironmentObject private var appState: AppState
