@@ -1,0 +1,88 @@
+name: Build IPA (signed)
+
+# Gera um .ipa ASSINADO com o SEU certificado Apple Developer, importado a partir
+# dos Secrets do repositório. Use só se quiser o .ipa já pronto para instalar sem
+# passar pelo AltStore. Segue o fluxo documentado pela Apple para CI.
+#
+# Secrets necessários (Settings ▸ Secrets and variables ▸ Actions):
+#   BUILD_CERTIFICATE_BASE64     base64 do seu .p12   -> base64 -i cert.p12 | pbcopy
+#   P12_PASSWORD                 senha do .p12
+#   BUILD_PROVISION_BASE64       base64 do .mobileprovision
+#   KEYCHAIN_PASSWORD            qualquer senha temporária para o keychain do runner
+#   APPLE_TEAM_ID                ID da sua equipe (ex.: 7HQ2K4M9XA)
+#
+# Ajuste o "method" em ExportOptions.plist (development / ad-hoc) conforme o perfil.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Selecionar Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Instalar XcodeGen
+        run: brew install xcodegen
+
+      - name: Gerar o projeto
+        run: xcodegen generate
+
+      - name: Importar certificado e perfil
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          BUILD_PROVISION_BASE64: ${{ secrets.BUILD_PROVISION_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          CERT_PATH="$RUNNER_TEMP/cert.p12"
+          PROFILE_PATH="$RUNNER_TEMP/profile.mobileprovision"
+          KEYCHAIN="$RUNNER_TEMP/app-signing.keychain-db"
+
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o "$CERT_PATH"
+          echo -n "$BUILD_PROVISION_BASE64"  | base64 --decode -o "$PROFILE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$CERT_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain-db
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/"
+
+      - name: Compilar e exportar
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project XSign.xcodeproj \
+            -scheme XSign \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/XSign.xcarchive" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            -allowProvisioningUpdates \
+            archive
+
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/XSign.xcarchive" \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath "$RUNNER_TEMP/export"
+
+      - name: Enviar o artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: XSign-signed-ipa
+          path: ${{ runner.temp }}/export/*.ipa
+          if-no-files-found: error

@@ -1,0 +1,215 @@
+/* XSign — English (development language) */
+
+/* Tabs */
+"tab.store" = "Store";
+"tab.downloads" = "Downloads";
+"tab.apps" = "Apps";
+"tab.files" = "Files";
+"tab.settings" = "Settings";
+
+/* Common */
+"common.cancel" = "Cancel";
+"common.close" = "Close";
+"common.delete" = "Delete";
+"common.search" = "Search";
+
+/* Store */
+"store.filter.all" = "All";
+"store.section.recent" = "Recently updated";
+"store.search" = "Search %d apps";
+"store.sources" = "Sources";
+"store.get" = "Get";
+"store.installed" = "In Apps";
+"store.empty.title" = "No sources yet";
+"store.empty.message" = "Add a source to browse apps.";
+
+/* App detail */
+"detail.whatsnew" = "What's new";
+"detail.info" = "Information";
+"detail.bundleid" = "Bundle ID";
+"detail.updated" = "Updated";
+"detail.versions" = "Previous versions";
+"detail.version" = "Version";
+"detail.size" = "Size";
+
+/* Sources */
+"sources.empty.title" = "No sources";
+"sources.empty.message" = "Tap + to add a repository.";
+"sources.footer" = "Swipe to remove. Touch and hold to reorder.";
+"sources.refreshAll" = "Refresh all";
+"sources.import" = "Import list";
+"sources.export" = "Export list";
+"sources.copyURLs" = "Copy all URLs";
+
+/* Add sources */
+"addsource.title" = "Add sources";
+"addsource.urls" = "URLs";
+"addsource.paste" = "Paste from clipboard";
+"addsource.hint" = "One URL per line. Paste several at once.";
+"addsource.found" = "Found";
+"addsource.appcount" = "%d apps";
+"addsource.add" = "Add %d sources";
+
+/* Downloads */
+"downloads.empty.title" = "No downloads";
+"downloads.empty.message" = "Apps you download appear here.";
+"downloads.inprogress" = "In progress";
+"downloads.done" = "Completed";
+"downloads.fromLink" = "Download from a link";
+"downloads.autoImport" = "Import automatically";
+"downloads.deleteAfter" = "Delete after importing";
+"downloads.download" = "Download";
+"downloads.queued" = "Queued";
+"downloads.failed" = "Failed — tap to retry";
+"downloads.imported" = "Imported to Apps";
+
+/* Apps */
+"apps.unsigned" = "Unsigned · %d";
+"apps.signed" = "Signed · %d";
+"apps.unsigned.plain" = "Unsigned";
+"apps.signed.plain" = "Signed";
+"apps.empty.title" = "Nothing here yet";
+"apps.empty.message" = "Import an .ipa to get started.";
+"apps.action.sign" = "Sign";
+"apps.action.signDefault" = "Sign with default options";
+"apps.action.share" = "Share .ipa";
+"apps.action.install" = "Install";
+"apps.action.resign" = "Re-sign";
+
+/* Sign */
+"sign.certificate" = "Certificate";
+"sign.noCert" = "Import a certificate to sign.";
+"sign.name" = "Name";
+"sign.options" = "Options";
+"sign.tweaks" = "Tweaks and dylibs";
+"sign.removeExtensions" = "Remove extensions";
+"sign.removeDeviceRestriction" = "Remove device restriction";
+"sign.fileSharing" = "Access via Files app";
+"sign.button" = "Sign";
+"sign.signing" = "Signing %@";
+"sign.done" = "Signed";
+"sign.dontClose" = "Don't close the app until it finishes";
+"sign.copyLog" = "Copy log";
+"sign.detail.binaries" = "%d binaries";
+"tweaks.footer" = "Add .dylib or .deb files from the Tweaks folder.";
+
+"sign.step.extract" = "Extract package";
+"sign.step.modify" = "Apply changes";
+"sign.step.inject" = "Inject tweaks";
+"sign.step.sign" = "Sign binaries";
+"sign.step.pack" = "Repackage";
+"sign.step.install" = "Install";
+
+/* Files */
+"files.folders" = "Folders";
+"files.certificates" = "Certificates";
+"files.tweaks" = "Tweaks";
+"files.import" = "Import resource";
+"files.newFolder" = "New folder";
+"files.sort" = "Sort";
+"files.used" = "used by XSign";
+"files.other" = "Other";
+
+/* Import resource */
+"import.title" = "Import resource";
+"import.fromFiles" = "From the Files app";
+"import.fromLink" = "From a link";
+"import.fromClipboard" = "From the clipboard";
+"import.routing" = "Where each file goes";
+"import.route.ipa" = "App to sign";
+"import.route.p12" = "Certificate (asks for the password)";
+"import.route.prov" = "Provisioning profile";
+"import.route.zip" = "Bundle: XSign opens and splits it";
+"import.route.deb" = "Tweak (also .dylib)";
+"import.route.json" = "Source list (also .txt)";
+
+/* Settings */
+"settings.currentCert" = "Certificate in use";
+"settings.certificates" = "Certificates";
+"settings.signing" = "Signing";
+"settings.defaultOptions" = "Default options";
+"settings.installAfter" = "Install after signing";
+"settings.deleteAfter" = "Delete original after signing";
+"settings.general" = "General";
+"settings.language" = "Language";
+"settings.appearance" = "Appearance";
+"settings.appIcon" = "App icon";
+"settings.version" = "Version";
+"settings.about" = "About and licenses";
+
+"appearance.system" = "System";
+"appearance.light" = "Light";
+"appearance.dark" = "Dark";
+
+"about.blurb" = "XSign signs and installs .ipa files using your own Apple Developer certificate. Everything stays on your device.";
+"about.openSource" = "Open source";
+
+"icon.graphite" = "Graphite";
+"icon.paper" = "Paper";
+
+/* Certificates */
+"cert.status.valid" = "Valid";
+"cert.status.expiring" = "Expiring soon";
+"cert.status.expired" = "Expired";
+"cert.status.revoked" = "Revoked";
+"cert.status.unknown" = "Not verified";
+"cert.expiresInDays" = "Expires in %d days";
+"cert.expiresOn" = "Expires %@";
+"cert.daysCount" = "%d days";
+"cert.type" = "Type";
+"cert.team" = "Team";
+"cert.teamID" = "Team ID";
+"cert.validity" = "Validity";
+"cert.issued" = "Issued";
+"cert.expires" = "Expires";
+"cert.profile" = "Profile";
+"cert.appID" = "App ID";
+"cert.devices" = "Registered devices";
+"cert.entitlements" = "Entitlements";
+"cert.useThis" = "Use this one";
+"cert.export" = "Export (.zip)";
+"cert.delete" = "Delete certificate";
+"certs.empty.title" = "No certificates";
+"certs.empty.message" = "Import a .p12 and profile to sign apps.";
+"certs.verifyAll" = "Verify all";
+
+/* Import certificate */
+"importcert.title" = "New certificate";
+"importcert.files" = "Files";
+"importcert.p12" = "Certificate and private key";
+"importcert.profile" = "Provisioning profile";
+"importcert.data" = "Details";
+"importcert.password" = "Password";
+"importcert.nickname" = "Nickname";
+"importcert.keychain" = "The password is stored in this device's Keychain and never leaves it.";
+"importcert.readFromProfile" = "Read from the profile";
+"importcert.import" = "Import";
+
+/* Language */
+"language.system" = "System";
+"language.followSystem" = "Follow the iPhone's language";
+"language.available" = "Available";
+"language.upcoming" = "Coming soon";
+"language.helpTranslate" = "Help translate XSign into your language.";
+"language.soon" = "Soon";
+"language.name.en" = "English";
+"language.name.pt-BR" = "Portuguese (Brazil)";
+"language.name.es" = "Spanish";
+"language.name.zh-Hans" = "Simplified Chinese";
+"language.name.zh-Hant" = "Traditional Chinese";
+"language.name.vi" = "Vietnamese";
+"language.name.ru" = "Russian";
+"language.name.tr" = "Turkish";
+"language.name.ar" = "Arabic";
+"language.name.id" = "Indonesian";
+"language.name.ja" = "Japanese";
+"language.name.ko" = "Korean";
+"language.name.fr" = "French";
+"language.name.de" = "German";
+
+/* Errors */
+"source.error.network" = "No response from the source.";
+"source.error.decode" = "Couldn't read this source's format.";
+"cert.error.password" = "Wrong password for the .p12.";
+"cert.error.mismatch" = "The certificate doesn't match the profile.";
+"cert.error.profile" = "Couldn't read the profile.";

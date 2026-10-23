@@ -1,0 +1,60 @@
+name: Build IPA (unsigned)
+
+# Gera um .ipa NÃO assinado, do jeito que apps de sideload são distribuídos.
+# Você assina depois com o seu certificado — pelo próprio XSign ou pelo AltStore/
+# SideStore. Não precisa de nenhum segredo/certificado neste workflow.
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Selecionar Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Instalar XcodeGen
+        run: brew install xcodegen
+
+      - name: Gerar o projeto
+        run: xcodegen generate
+
+      - name: Compilar (archive não assinado)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project XSign.xcodeproj \
+            -scheme XSign \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/XSign.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            archive
+
+      - name: Empacotar o .ipa
+        run: |
+          APP_DIR="$RUNNER_TEMP/XSign.xcarchive/Products/Applications"
+          cd "$APP_DIR"
+          mkdir -p Payload
+          mv XSign.app Payload/XSign.app
+          zip -qry "$RUNNER_TEMP/XSign-unsigned.ipa" Payload
+          echo "IPA em $RUNNER_TEMP/XSign-unsigned.ipa"
+
+      - name: Enviar o artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: XSign-unsigned-ipa
+          path: ${{ runner.temp }}/XSign-unsigned.ipa
+          if-no-files-found: error
