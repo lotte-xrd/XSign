@@ -52,9 +52,8 @@ struct ImportResourceView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L.tr("common.cancel")) { dismiss() } }
             }
-            .fileImporter(isPresented: $showPicker, allowedContentTypes: Self.types, allowsMultipleSelection: true) { result in
-                switch result {
-                case .success(let urls):
+            .sheet(isPresented: $showPicker) {
+                DocumentPicker(allowsMultipleSelection: true) { urls in
                     errorMessage = nil
                     var lastMsg: String?
                     for u in urls {
@@ -68,8 +67,6 @@ struct ImportResourceView: View {
                         statusMessage = lastMsg
                         dismiss()
                     }
-                case .failure(let err):
-                    errorMessage = err.localizedDescription
                 }
             }
             .alert(L.tr("import.fromLink"), isPresented: $showLinkPrompt) {
@@ -85,17 +82,7 @@ struct ImportResourceView: View {
         }
     }
 
-    static let types: [UTType] = [
-        UTType(filenameExtension: "ipa") ?? .data,
-        UTType(filenameExtension: "p12") ?? .data,
-        UTType(filenameExtension: "mobileprovision") ?? .data,
-        .zip,
-        UTType(filenameExtension: "deb") ?? .data,
-        UTType(filenameExtension: "dylib") ?? .data,
-        .json,
-        .plainText,
-        .data
-    ]
+    static let types: [UTType] = [.item, .data, .content]
 
     private func importFromClipboard() {
         guard let str = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines),

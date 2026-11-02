@@ -1,16 +1,15 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct ImportCertificateView: View {
     @EnvironmentObject private var app: AppState
     @Environment(\.dismiss) private var dismiss
 
-    private enum PickerKind: Identifiable {
+    private enum PickerKind {
         case p12, profile, zip
-        var id: Self { self }
     }
 
-    @State private var activePicker: PickerKind?
+    @State private var showPicker = false
+    @State private var pickerKind: PickerKind = .p12
     @State private var p12Data: Data?
     @State private var p12FileName: String?
     @State private var profileData: Data?
@@ -25,7 +24,8 @@ struct ImportCertificateView: View {
             Form {
                 Section {
                     Button {
-                        activePicker = .zip
+                        pickerKind = .zip
+                        showPicker = true
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "doc.zipper")
@@ -49,10 +49,12 @@ struct ImportCertificateView: View {
 
                 Section(L.tr("importcert.files")) {
                     fileRow("P12", p12FileName ?? L.tr("importcert.p12"), loaded: p12Data != nil) {
-                        activePicker = .p12
+                        pickerKind = .p12
+                        showPicker = true
                     }
                     fileRow("PROV", profileFileName ?? L.tr("importcert.profile"), loaded: profileData != nil) {
-                        activePicker = .profile
+                        pickerKind = .profile
+                        showPicker = true
                     }
                 }
 
@@ -99,73 +101,57 @@ struct ImportCertificateView: View {
                         .disabled(!(p12Data != nil && profileData != nil && !password.isEmpty))
                 }
             }
-            .fileImporter(
-                isPresented: Binding(get: { activePicker != nil }, set: { if !$0 { activePicker = nil } }),
-                allowedContentTypes: allowedTypes(for: activePicker)
-            ) { result in
-                handlePickedFile(result)
+            .sheet(isPresented: $showPicker) {
+                DocumentPicker(allowsMultipleSelection: false) { urls in
+                    handlePickedURLs(urls)
+                }
             }
         }
     }
 
-    private func allowedTypes(for kind: PickerKind?) -> [UTType] {
-        switch kind {
-        case .zip:
-            return [.zip, .archive, .data]
-        case .p12:
-            return [UTType(filenameExtension: "p12") ?? .data, .pkcs12, .data]
-        case .profile:
-            return [UTType(filenameExtension: "mobileprovision") ?? .data, .data]
-        case .none:
-            return [.data]
-        }
-    }
-
-    private func handlePickedFile(_ result: Result<URL, Error>) {
-        guard let kind = activePicker else { return }
-        activePicker = nil
+    private func handlePickedURLs(_ urls: [URL]) {
         errorMessage = nil
+        guard let url = urls.first else { return }
 
-        switch result {
-        case .failure(let error):
-            errorMessage = error.localizedDescription
-        case .success(let url):
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let ext = url.pathExtension.lowercased()
 
-            switch kind {
-            case .zip:
-                do {
-                    let cert = try app.certificateService.importFromZip(url: url, makeActive: app.certificates.isEmpty)
-                    app.certificates.append(cert)
-                    app.persist()
-                    dismiss()
-                } catch {
-                    errorMessage = error.localizedDescription
-                }
-
-            case .p12:
-                if let d = try? Data(contentsOf: url), !d.isEmpty {
-                    p12Data = d
-                    p12FileName = url.lastPathComponent
-                } else {
-                    errorMessage = "Não foi possível ler o arquivo .p12."
-                }
-
-            case .profile:
-                do {
-                    let d = try Data(contentsOf: url)
-                    let parsed = try app.certificateService.readProfile(data: d)
-                    profileData = d
-                    profileFileName = url.lastPathComponent
-                    profile = parsed
-                    if nickname.isEmpty, let t = parsed.teamName ?? parsed.name {
-                        nickname = t
-                    }
-                } catch {
-                    errorMessage = error.localizedDescription
-                }
+        if ext == "zip" || (pickerKind == .zip && ext != "p12" && ext != "mobileprovision") {
+            do {
+                let cert = try app.certificateService.importFromZip(url: url, makeActive: app.certificates.isEmpty)
+                app.certificates.append(cert)
+                app.persist()
+                dismiss()
+                return
+            } catch {
+                errorMessage = error.localizedDescription
+                return
             }
+        }
+
+        guard let data = try? Data(contentsOf: url), !data.isEmpty else {
+            errorMessage = "Não foi possível ler o arquivo \(url.lastPathComponent)."
+            return
+        }
+
+        let isProvision = ext == "mobileprovision"
+            || ext == "provisionprofile"
+            || (try? app.certificateService.readProfile(data: data)) != nil
+
+        if pickerKind == .profile || isProvision {
+            do {
+                let parsed = try app.certificateService.readProfile(data: data)
+                profileData = data
+                profileFileName = url.lastPathComponent
+                profile = parsed
+                if nickname.isEmpty, let t = parsed.teamName ?? parsed.name {
+                    nickname = t
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        } else {
+            p12Data = data
+            p12FileName = url.lastPathComponent
         }
     }
 

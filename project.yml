@@ -41,14 +41,17 @@ targets:
           - es
         CFBundleDocumentTypes:
           - CFBundleTypeName: iOS App Package
-            LSHandlerRank: Owner
+            LSHandlerRank: Alternate
             LSItemContentTypes:
               - com.apple.itunes.ipa
               - public.zip-archive
           - CFBundleTypeName: Signing Resource
-            LSHandlerRank: Owner
+            LSHandlerRank: Alternate
             LSItemContentTypes:
+              - public.item
               - public.data
+              - public.content
+              - com.rsa.pkcs-12
         CFBundleURLTypes:
           - CFBundleURLName: com.xsign.scheme
             CFBundleURLSchemes:

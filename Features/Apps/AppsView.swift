@@ -82,12 +82,8 @@ struct AppsView: View {
             .sheet(isPresented: $showShare) {
                 ShareSheet(items: shareItems)
             }
-            .fileImporter(
-                isPresented: $showIPAImporter,
-                allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data],
-                allowsMultipleSelection: true
-            ) { result in
-                if case .success(let urls) = result {
+            .sheet(isPresented: $showIPAImporter) {
+                DocumentPicker(allowsMultipleSelection: true) { urls in
                     for u in urls {
                         do {
                             _ = try app.importResource(url: u)

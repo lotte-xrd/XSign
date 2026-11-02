@@ -60,9 +60,11 @@ struct SourcesView: View {
         .sheet(isPresented: Binding(get: { shareURL != nil }, set: { if !$0 { shareURL = nil } })) {
             if let shareURL { ShareSheet(items: [shareURL]) }
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.plainText, .json]) { res in
-            if case .success(let url) = res {
-                _ = try? app.importResource(url: url)
+        .sheet(isPresented: $showImporter) {
+            DocumentPicker(allowsMultipleSelection: false) { urls in
+                if let url = urls.first {
+                    _ = try? app.importResource(url: url)
+                }
             }
         }
     }

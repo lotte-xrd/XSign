@@ -157,6 +157,54 @@ final class AppState: ObservableObject {
             persist()
             return "Certificado importado: \(cert.nickname)"
 
+        case "p12", "pfx":
+            Paths.ensure()
+            let stagedP12 = Paths.certs.appendingPathComponent("staged.p12")
+            try? FileManager.default.removeItem(at: stagedP12)
+            try FileManager.default.copyItem(at: url, to: stagedP12)
+            let stagedProv = Paths.certs.appendingPathComponent("staged.mobileprovision")
+            if FileManager.default.fileExists(atPath: stagedProv.path),
+               let p12Data = try? Data(contentsOf: stagedP12),
+               let provData = try? Data(contentsOf: stagedProv) {
+                let cert = try certificateService.saveCertificate(
+                    p12Data: p12Data,
+                    profileData: provData,
+                    password: "1",
+                    nickname: nil,
+                    makeActive: certificates.isEmpty
+                )
+                try? FileManager.default.removeItem(at: stagedP12)
+                try? FileManager.default.removeItem(at: stagedProv)
+                certificates.append(cert)
+                persist()
+                return "Certificado importado: \(cert.nickname)"
+            }
+            return "Arquivo .p12 carregado. Selecione também o .mobileprovision."
+
+        case "mobileprovision", "provisionprofile":
+            Paths.ensure()
+            let stagedProv = Paths.certs.appendingPathComponent("staged.mobileprovision")
+            try? FileManager.default.removeItem(at: stagedProv)
+            try FileManager.default.copyItem(at: url, to: stagedProv)
+            let stagedP12 = Paths.certs.appendingPathComponent("staged.p12")
+            if FileManager.default.fileExists(atPath: stagedP12.path),
+               let p12Data = try? Data(contentsOf: stagedP12),
+               let provData = try? Data(contentsOf: stagedProv) {
+                let cert = try certificateService.saveCertificate(
+                    p12Data: p12Data,
+                    profileData: provData,
+                    password: "1",
+                    nickname: nil,
+                    makeActive: certificates.isEmpty
+                )
+                try? FileManager.default.removeItem(at: stagedP12)
+                try? FileManager.default.removeItem(at: stagedProv)
+                certificates.append(cert)
+                persist()
+                return "Certificado importado: \(cert.nickname)"
+            }
+            return "Perfil carregado. Selecione também o .p12."
+
         case "deb", "dylib":
             Paths.ensure()
             let dest = Paths.tweaks.appendingPathComponent(url.lastPathComponent)

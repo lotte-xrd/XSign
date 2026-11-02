@@ -213,19 +213,10 @@ struct TweaksView: View {
         .navigationTitle(L.tr("sign.tweaks"))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { loadTweaksFolder() }
-        .fileImporter(
-            isPresented: $showPicker,
-            allowedContentTypes: [
-                UTType(filenameExtension: "dylib") ?? .data,
-                UTType(filenameExtension: "deb") ?? .data
-            ],
-            allowsMultipleSelection: true
-        ) { res in
-            if case .success(let urls) = res {
+        .sheet(isPresented: $showPicker) {
+            DocumentPicker(allowsMultipleSelection: true) { urls in
                 Paths.ensure()
                 for u in urls {
-                    let scoped = u.startAccessingSecurityScopedResource()
-                    defer { if scoped { u.stopAccessingSecurityScopedResource() } }
                     let dest = Paths.tweaks.appendingPathComponent(u.lastPathComponent)
                     try? FileManager.default.removeItem(at: dest)
                     try? FileManager.default.copyItem(at: u, to: dest)
