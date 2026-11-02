@@ -7,8 +7,11 @@ struct SignProgressView: View {
     let app: AppItem
     let certificate: Certificate
     let options: SignOptions
+    var onCompleteDismissParent: (() -> Void)? = nil
 
     @State private var progress = SignProgress(steps: [], fraction: 0)
+    @State private var showShare = false
+    @State private var shareItems: [Any] = []
 
     var body: some View {
         VStack(spacing: 16) {
@@ -19,10 +22,13 @@ struct SignProgressView: View {
                         .frame(width: 60).offset(y: 14)
                 }
 
-            Text(progress.finished ? L.tr("sign.done") : L.tr("sign.signing", app.name))
+            Text(progress.finished ? L.tr("sign.done") : L.tr("sign.signing", options.name ?? app.name))
                 .font(.headline)
+                .padding(.top, 8)
             if progress.finished {
-                Text(app.name).font(.caption).foregroundStyle(.secondary)
+                Text(progress.finalBundleID ?? options.bundleID ?? app.bundleID)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
             } else {
                 Text(L.tr("sign.dontClose")).font(.caption).foregroundStyle(.secondary)
             }
@@ -42,12 +48,26 @@ struct SignProgressView: View {
             if progress.finished {
                 VStack(spacing: 8) {
                     PrimaryButton(title: L.tr("apps.action.install")) { install() }
-                    SecondaryButton(title: L.tr("apps.action.share")) {}
+                    SecondaryButton(title: L.tr("apps.action.share")) {
+                        if let uStr = progress.shareURL ?? progress.downloadURL, let u = URL(string: uStr) {
+                            shareItems = [u]
+                            showShare = true
+                        }
+                    }
+                    Button(L.tr("common.close")) {
+                        dismiss()
+                        onCompleteDismissParent?()
+                    }
+                    .padding(.top, 4)
                 }
                 .padding(Spacing.screen)
             } else if progress.error != nil {
                 VStack(spacing: 8) {
-                    Text(progress.error ?? "").font(.caption).foregroundStyle(Color.brick)
+                    Text(progress.error ?? "")
+                        .font(.caption)
+                        .foregroundStyle(Color.brick)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
                     SecondaryButton(title: L.tr("sign.copyLog")) {
                         UIPasteboard.general.string = progress.error
                     }
@@ -58,6 +78,9 @@ struct SignProgressView: View {
                 Button(L.tr("common.cancel")) { dismiss() }
                     .padding(.bottom, Spacing.screen)
             }
+        }
+        .sheet(isPresented: $showShare) {
+            ShareSheet(items: shareItems)
         }
         .task { await run() }
     }
@@ -77,22 +100,40 @@ struct SignProgressView: View {
         signed.certificateName = certificate.nickname
         signed.signedAt = Date()
         signed.filePath = progress.outputPath ?? app.filePath
-        signed.name = options.name ?? app.name
-        signed.bundleID = options.bundleID ?? app.bundleID
-        signed.version = options.version ?? app.version
-        appState.apps.append(signed)
-        appState.persist()
-        if appState.settings.installAfterSign { install() }
+        signed.installURL = progress.installURL
+        signed.signedDownloadURL = progress.downloadURL
+        signed.shareURL = progress.shareURL
+        signed.name = progress.finalName ?? options.name ?? app.name
+        signed.bundleID = progress.finalBundleID ?? options.bundleID ?? app.bundleID
+        signed.version = progress.finalVersion ?? options.version ?? app.version
+        if let fSize = progress.fileSize, fSize > 0 {
+            signed.size = fSize
+        }
+
+        appState.apps.insert(signed, at: 0)
+        if appState.settings.deleteOriginalAfterSign, app.state == .unsigned {
+            appState.delete(app)
+        } else {
+            appState.persist()
+        }
+
+        if appState.settings.installAfterSign {
+            install()
+        }
     }
 
     private func install() {
         Task {
-            try? await appState.installService.install(
-                ipaPath: progress.outputPath ?? app.filePath,
-                bundleID: options.bundleID ?? app.bundleID,
-                version: options.version ?? app.version,
-                title: options.name ?? app.name)
-            dismiss()
+            if let installURL = progress.installURL {
+                try? await appState.installService.openInstallURL(installURL)
+            } else {
+                try? await appState.installService.install(
+                    ipaPath: progress.outputPath ?? app.filePath,
+                    bundleID: progress.finalBundleID ?? options.bundleID ?? app.bundleID,
+                    version: progress.finalVersion ?? options.version ?? app.version,
+                    title: progress.finalName ?? options.name ?? app.name
+                )
+            }
         }
     }
 }
@@ -105,7 +146,7 @@ struct StepRow: View {
             icon
             Text(step.kind.label).font(.callout)
             Spacer()
-            Text(detail).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+            Text(detail).font(.caption2.monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
         }
         .padding(.vertical, 7)
         .opacity(isPending ? 0.5 : 1)

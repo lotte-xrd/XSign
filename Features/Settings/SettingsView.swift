@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
     @EnvironmentObject private var app: AppState
@@ -25,7 +26,7 @@ struct SettingsView: View {
                 }
 
                 Section(L.tr("settings.signing")) {
-                    NavigationLink(L.tr("settings.defaultOptions")) { EmptyView() }
+                    NavigationLink(L.tr("settings.defaultOptions")) { SigningServerSettingsView() }
                     Toggle(L.tr("settings.installAfter"), isOn: $app.settings.installAfterSign)
                     Toggle(L.tr("settings.deleteAfter"), isOn: $app.settings.deleteOriginalAfterSign)
                 }
@@ -55,11 +56,37 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .onChange(of: app.settings.appearance) { _ in app.settings.save() }
             .onChange(of: app.settings.installAfterSign) { _ in app.settings.save() }
+            .onChange(of: app.settings.deleteOriginalAfterSign) { _ in app.settings.save() }
         }
     }
 
     private var currentLanguageName: String {
         LocalizationManager.all.first { $0.code == language.code }?.endonym ?? L.tr("language.system")
+    }
+}
+
+struct SigningServerSettingsView: View {
+    @EnvironmentObject private var app: AppState
+
+    var body: some View {
+        Form {
+            Section("Servidor de Assinatura (zsign + OTA)") {
+                TextField("https://exploiting-ios.online", text: $app.settings.serverURL)
+                    .font(.callout.monospaced())
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+            }
+            Section {
+                LabeledContent("Device Queue ID") {
+                    Text("\(KeychainHelper.deviceID.prefix(12))…")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .navigationTitle(L.tr("settings.defaultOptions"))
+        .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: app.settings.serverURL) { _ in app.settings.save() }
     }
 }
 
@@ -93,8 +120,9 @@ struct AboutView: View {
         List {
             Section { Text(L.tr("about.blurb")).font(.subheadline) }
             Section(L.tr("about.openSource")) {
-                LabeledContent("zsign", value: "assinatura")
-                LabeledContent("ZIPFoundation", value: "ipa")
+                LabeledContent("zsign 1.1.3", value: "Assinatura C++/OpenSSL")
+                LabeledContent("ZIPFoundation", value: "Leitura e pacotes .ipa")
+                LabeledContent("Exploiting iOS", value: "OTA itms-services")
             }
         }
         .navigationTitle(L.tr("settings.about"))
@@ -110,13 +138,18 @@ struct AppIconView: View {
         List {
             ForEach(icons, id: \.self) { icon in
                 Button {
-                    app.settings.appIcon = icon; app.settings.save()
-                    // UIApplication.shared.setAlternateIconName(icon == "paper" ? "AppIcon-Papel" : nil)
+                    app.settings.appIcon = icon
+                    app.settings.save()
+                    if UIApplication.shared.supportsAlternateIcons {
+                        UIApplication.shared.setAlternateIconName(icon == "paper" ? "AppIcon-Papel" : nil)
+                    }
                 } label: {
                     HStack {
                         Text(icon == "graphite" ? L.tr("icon.graphite") : L.tr("icon.paper"))
                         Spacer()
-                        if app.settings.appIcon == icon { Image(systemName: "checkmark").foregroundStyle(Color.graphite) }
+                        if app.settings.appIcon == icon {
+                            Image(systemName: "checkmark").foregroundStyle(Color.graphite)
+                        }
                     }
                 }.foregroundStyle(Color.graphite)
             }

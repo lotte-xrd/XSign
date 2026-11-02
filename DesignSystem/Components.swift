@@ -42,7 +42,7 @@ struct SecondaryButton: View {
     }
 }
 
-/// Pílula "Obter" / "Instalar" das listas.
+/// Pílula "Obter" / "Assinar" / "Instalar" das listas.
 struct PillButton: View {
     let title: String
     var filled: Bool = false
@@ -52,8 +52,9 @@ struct PillButton: View {
         Button(action: action) {
             Text(title.uppercased())
                 .font(.caption2.weight(.bold))
-                .padding(.horizontal, 12).padding(.vertical, 5)
+                .padding(.horizontal, 12).padding(.vertical, 6)
         }
+        .buttonStyle(.plain)
         .foregroundStyle(filled ? Color.onGraphite : Color.graphite)
         .background(filled ? Color.graphite : Color.fill, in: Capsule())
     }
@@ -144,19 +145,40 @@ struct EmptyStateView: View {
     }
 }
 
-// MARK: - Ícone de app (placeholder a partir da inicial)
+// MARK: - Cache de Ícones Remotos e Locais
 
+final class IconCache {
+    static let shared = IconCache()
+    private let memory = NSCache<NSString, UIImage>()
+
+    func image(for key: String) -> UIImage? {
+        memory.object(forKey: key as NSString)
+    }
+
+    func store(_ image: UIImage, for key: String) {
+        memory.setObject(image, forKey: key as NSString)
+    }
+}
+
+/// Ícone de app real: carrega de Data, de arquivo local extraído do .ipa ou de URL remota com cache.
 struct AppIconThumb: View {
     let name: String
     var data: Data? = nil
+    var iconPath: String? = nil
+    var url: URL? = nil
     var size: CGFloat = 44
 
+    @State private var remoteImage: UIImage?
+
     var body: some View {
-        Group {
-            if let data, let ui = UIImage(data: data) {
-                Image(uiImage: ui).resizable()
+        ZStack {
+            if let ui = localUIImage ?? remoteImage {
+                Image(uiImage: ui)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFill()
             } else {
-                Text(String(name.prefix(1)).uppercased())
+                Text(String(name.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased())
                     .font(.system(size: size * 0.42, weight: .bold))
                     .foregroundStyle(Color.graphite)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -165,6 +187,50 @@ struct AppIconThumb: View {
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: size * Radius.icon, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: size * Radius.icon, style: .continuous)
+                .stroke(Color.hairline.opacity(0.6), lineWidth: 0.5)
+        )
+        .task(id: url) {
+            await loadRemoteIfNeeded()
+        }
+    }
+
+    private var localUIImage: UIImage? {
+        if let data, let img = UIImage(data: data) {
+            return img
+        }
+        if let iconPath, !iconPath.isEmpty {
+            let resolved = Paths.resolve(iconPath)
+            if let cached = IconCache.shared.image(for: resolved.path) {
+                return cached
+            }
+            if let d = try? Data(contentsOf: resolved), let img = UIImage(data: d) {
+                IconCache.shared.store(img, for: resolved.path)
+                return img
+            }
+        }
+        return nil
+    }
+
+    private func loadRemoteIfNeeded() async {
+        guard localUIImage == nil, let url else { return }
+        let key = url.absoluteString
+        if let cached = IconCache.shared.image(for: key) {
+            remoteImage = cached
+            return
+        }
+        do {
+            var req = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 15)
+            req.setValue("XSign/1.0 (iOS)", forHTTPHeaderField: "User-Agent")
+            let (data, _) = try await URLSession.shared.data(for: req)
+            if let img = UIImage(data: data) {
+                IconCache.shared.store(img, for: key)
+                await MainActor.run { remoteImage = img }
+            }
+        } catch {
+            // Mantém o fallback da inicial se a imagem falhar
+        }
     }
 }
 
@@ -184,6 +250,7 @@ struct FilterChips: View {
                             .font(.caption.weight(.semibold))
                             .padding(.horizontal, 12).padding(.vertical, 6)
                     }
+                    .buttonStyle(.plain)
                     .foregroundStyle(on ? Color.onGraphite : Color.lead)
                     .background(on ? Color.graphite : Color.surface, in: Capsule())
                     .overlay(Capsule().stroke(Color.hairline, lineWidth: on ? 0 : 1))
@@ -191,4 +258,16 @@ struct FilterChips: View {
             }
         }
     }
+}
+
+// MARK: - Share Sheet nativo do iOS
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

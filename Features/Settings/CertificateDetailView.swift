@@ -2,7 +2,11 @@ import SwiftUI
 
 struct CertificateDetailView: View {
     @EnvironmentObject private var app: AppState
+    @Environment(\.dismiss) private var dismiss
     let cert: Certificate
+
+    @State private var exportedZipURL: URL?
+    @State private var exportError: String?
 
     var body: some View {
         List {
@@ -49,24 +53,52 @@ struct CertificateDetailView: View {
                 LabeledContent(L.tr("cert.entitlements"), value: "\(cert.entitlementsCount)")
             }
 
+            if let exportError {
+                Section {
+                    Text(exportError).font(.caption).foregroundStyle(Color.brick)
+                }
+            }
+
             Section {
                 if !cert.inUse {
                     Button(L.tr("cert.useThis")) { use() }.foregroundStyle(Color.graphite)
                 }
-                Button(L.tr("cert.export")) {}.foregroundStyle(Color.graphite)
+                Button(L.tr("cert.export")) { exportZip() }.foregroundStyle(Color.graphite)
                 Button(L.tr("cert.delete"), role: .destructive) { delete() }
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: Binding(get: { exportedZipURL != nil }, set: { if !$0 { exportedZipURL = nil } })) {
+            if let exportedZipURL { ShareSheet(items: [exportedZipURL]) }
+        }
     }
 
     private func use() {
-        for i in app.certificates.indices { app.certificates[i].inUse = (app.certificates[i].id == cert.id) }
+        for i in app.certificates.indices {
+            app.certificates[i].inUse = (app.certificates[i].id == cert.id)
+        }
         app.persist()
     }
 
+    private func exportZip() {
+        do {
+            exportedZipURL = try app.certificateService.exportCertificateZip(cert)
+        } catch {
+            exportError = error.localizedDescription
+        }
+    }
+
     private func delete() {
+        KeychainHelper.delete(key: cert.keychainKey)
+        let folder = Paths.resolve(cert.p12Path).deletingLastPathComponent()
+        if folder.path.contains("/Certificates/") {
+            try? FileManager.default.removeItem(at: folder)
+        }
         app.certificates.removeAll { $0.id == cert.id }
+        if !app.certificates.isEmpty && !app.certificates.contains(where: { $0.inUse }) {
+            app.certificates[0].inUse = true
+        }
         app.persist()
+        dismiss()
     }
 }

@@ -1,6 +1,7 @@
 import SwiftUI
+import Combine
 
-/// Estado central do app: dados carregados, serviços e preferências.
+/// Estado central do app: dados reais persistidos, serviços e preferências.
 @MainActor
 final class AppState: ObservableObject {
     @Published var selectedTab: AppTab = .store
@@ -12,44 +13,87 @@ final class AppState: ObservableObject {
     @Published var settings = Settings.load()
 
     @Published var downloads = DownloadManager()
+    @Published var lastImportMessage: String?
 
     let sourceService = SourceService()
     let certificateService = CertificateService()
-    let installService: InstallService = LocalServerInstallService()
-    /// Troque por `ZSignService()` quando o bridge do zsign estiver ligado.
-    let signingService: SigningService = MockSigningService()
+    let installService: InstallService = OTAInstallService()
+    let signingService: SigningService = RemoteSigningService()
+
+    private var downloadsCancellable: AnyCancellable?
 
     var currentCertificate: Certificate? {
         certificates.first(where: { $0.inUse }) ?? certificates.first
+    }
+
+    init() {
+        downloadsCancellable = downloads.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        downloads.onDownloadFinished = { [weak self] task, fileURL in
+            guard let self else { return }
+            Task { @MainActor in
+                if self.settings.autoImportDownloads {
+                    _ = try? self.importIPA(
+                        from: fileURL,
+                        origin: task.sourceName ?? task.url.host,
+                        downloadURL: task.url,
+                        fallbackIconURL: task.iconURL,
+                        deleteSourceFile: self.settings.deleteAfterImport
+                    )
+                }
+            }
+        }
     }
 
     // MARK: - Ciclo de vida
 
     func bootstrap() async {
         Paths.ensure()
+        _ = KeychainHelper.deviceID // garante o UUID fixo do aparelho no Keychain
+
         apps = await Store.shared.load([AppItem].self, from: "apps")
         certificates = await Store.shared.load([Certificate].self, from: "certificates")
         sources = await Store.shared.load([Source].self, from: "sources")
-        if apps.isEmpty && certificates.isEmpty { loadSampleData() }
-    }
+        sourceApps = await Store.shared.load([SourceApp].self, from: "sourceAppsCache")
 
-    func persist() {
-        Task {
-            await Store.shared.save(apps, to: "apps")
-            await Store.shared.save(certificates, to: "certificates")
-            await Store.shared.save(sources, to: "sources")
+        // Atualiza status de validade dos certificados carregados
+        for i in certificates.indices {
+            certificates[i].status = certificateService.status(expiresAt: certificates[i].expiresAt)
+        }
+
+        // Atualiza todas as fontes cadastradas em segundo plano
+        if !sources.isEmpty {
+            await refreshAllSources()
         }
     }
 
-    // MARK: - Deep links (xsign://)
+    func persist() {
+        let currentApps = apps
+        let currentCerts = certificates
+        let currentSources = sources
+        let currentSourceApps = sourceApps
+        Task {
+            await Store.shared.save(currentApps, to: "apps")
+            await Store.shared.save(currentCerts, to: "certificates")
+            await Store.shared.save(currentSources, to: "sources")
+            await Store.shared.save(currentSourceApps, to: "sourceAppsCache")
+        }
+    }
+
+    // MARK: - Deep links (xsign:// e abertura direta de arquivos .ipa / .p12 / .mobileprovision / .zip)
 
     func handle(url: URL) {
+        if url.isFileURL {
+            _ = try? importResource(url: url)
+            return
+        }
         guard url.scheme == "xsign",
               let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let target = comps.queryItems?.first(where: { $0.name == "url" })?.value,
               let inner = URL(string: target) else { return }
         switch url.host {
-        case "add":
+        case "add", "source":
             selectedTab = .store
             pendingSourceURL = inner
         case "download":
@@ -63,16 +107,28 @@ final class AppState: ObservableObject {
     /// URL de fonte vinda de um link, para a tela "Adicionar fontes" pré-preencher.
     @Published var pendingSourceURL: URL?
 
-    // MARK: - Fontes
+    // MARK: - Fontes (Repositórios)
 
     func addSource(url: URL) async throws {
-        let result = try await sourceService.fetch(url: url)
+        let existing = sources.first(where: { $0.url.absoluteString.lowercased() == url.absoluteString.lowercased() })
+        let result = try await sourceService.fetch(url: url, existingID: existing?.id)
         var source = result.source
-        source.order = sources.count
-        sources.append(source)
+        if let idx = sources.firstIndex(where: { $0.id == source.id }) {
+            source.order = sources[idx].order
+            sources[idx] = source
+        } else {
+            source.order = sources.count
+            sources.append(source)
+        }
         sourceApps.removeAll { $0.sourceID == source.id }
         sourceApps.append(contentsOf: result.apps)
         persist()
+    }
+
+    func refreshAllSources() async {
+        for source in sources {
+            try? await addSource(url: source.url)
+        }
     }
 
     func removeSource(_ source: Source) {
@@ -81,41 +137,123 @@ final class AppState: ObservableObject {
         persist()
     }
 
+    // MARK: - Importador Universal de Recursos (.ipa, .zip, .p12, .mobileprovision, .deb, .dylib, .json)
+
+    @discardableResult
+    func importResource(url: URL) throws -> String {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+
+        let ext = url.pathExtension.lowercased()
+        switch ext {
+        case "ipa":
+            let item = try importIPA(from: url, origin: "Arquivos", downloadURL: nil, fallbackIconURL: nil, deleteSourceFile: false)
+            selectedTab = .apps
+            return "App importado: \(item.name)"
+
+        case "zip":
+            let cert = try certificateService.importFromZip(url: url, makeActive: certificates.isEmpty)
+            certificates.append(cert)
+            persist()
+            return "Certificado importado: \(cert.nickname)"
+
+        case "deb", "dylib":
+            Paths.ensure()
+            let dest = Paths.tweaks.appendingPathComponent(url.lastPathComponent)
+            try? FileManager.default.removeItem(at: dest)
+            try FileManager.default.copyItem(at: url, to: dest)
+            return "Tweak importado: \(url.lastPathComponent)"
+
+        case "json", "txt":
+            let content = try String(contentsOf: url, encoding: .utf8)
+            let candidateURLs = content
+                .components(separatedBy: .newlines)
+                .compactMap { URL(string: $0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+                .filter { $0.scheme == "http" || $0.scheme == "https" }
+            if !candidateURLs.isEmpty {
+                Task {
+                    for u in candidateURLs { try? await addSource(url: u) }
+                }
+                return "\(candidateURLs.count) fonte(s) adicionada(s)"
+            }
+            if let result = try? Data(contentsOf: url) {
+                let tempURL = Paths.sourceCache.appendingPathComponent(url.lastPathComponent)
+                try? result.write(to: tempURL)
+            }
+            return "Arquivo de fontes processado"
+
+        default:
+            let dest = Paths.downloads.appendingPathComponent(url.lastPathComponent)
+            try? FileManager.default.removeItem(at: dest)
+            try FileManager.default.copyItem(at: url, to: dest)
+            return "Arquivo salvo em Downloads"
+        }
+    }
+
+    @discardableResult
+    func importIPA(
+        from sourceURL: URL,
+        origin: String?,
+        downloadURL: URL?,
+        fallbackIconURL: URL? = nil,
+        deleteSourceFile: Bool = false
+    ) throws -> AppItem {
+        Paths.ensure()
+        let appID = UUID()
+        let fileName = sourceURL.lastPathComponent.lowercased().hasSuffix(".ipa")
+            ? sourceURL.lastPathComponent
+            : "\(sourceURL.lastPathComponent).ipa"
+        let destURL = Paths.unsigned.appendingPathComponent("\(appID.uuidString)-\(fileName)")
+
+        if sourceURL.standardizedFileURL != destURL.standardizedFileURL {
+            try? FileManager.default.removeItem(at: destURL)
+            try FileManager.default.copyItem(at: sourceURL, to: destURL)
+            if deleteSourceFile {
+                try? FileManager.default.removeItem(at: sourceURL)
+            }
+        }
+
+        let fileSize = (try? FileManager.default.attributesOfItem(atPath: destURL.path)[.size] as? Int64) ?? 0
+        let metadata = try? IPAPackageReader.read(ipaURL: destURL)
+
+        var savedIconPath: String? = nil
+        if let iconData = metadata?.iconData {
+            let iconURL = Paths.icons.appendingPathComponent("\(appID.uuidString).png")
+            if (try? iconData.write(to: iconURL, options: .atomic)) != nil {
+                savedIconPath = Paths.relative(iconURL)
+            }
+        }
+
+        let item = AppItem(
+            id: appID,
+            name: metadata?.name ?? sourceURL.deletingPathExtension().lastPathComponent,
+            bundleID: metadata?.bundleID ?? "com.imported.app",
+            version: metadata?.version ?? "1.0",
+            iconPath: savedIconPath,
+            iconURL: fallbackIconURL,
+            filePath: Paths.relative(destURL),
+            downloadURL: downloadURL,
+            size: fileSize,
+            state: .unsigned,
+            origin: origin
+        )
+
+        apps.insert(item, at: 0)
+        persist()
+        return item
+    }
+
     // MARK: - Apps
 
     func delete(_ app: AppItem) {
         apps.removeAll { $0.id == app.id }
-        try? FileManager.default.removeItem(atPath: app.filePath)
+        if !app.filePath.isEmpty && !app.filePath.hasPrefix("http") {
+            try? FileManager.default.removeItem(at: Paths.resolve(app.filePath))
+        }
+        if let iconPath = app.iconPath {
+            try? FileManager.default.removeItem(at: Paths.resolve(iconPath))
+        }
         persist()
-    }
-
-    // MARK: - Dados de exemplo (primeiro arranque)
-
-    private func loadSampleData() {
-        let cal = Calendar.current
-        certificates = [
-            Certificate(nickname: "Pessoal", teamID: "7HQ2K4M9XA", teamName: "Marina Costa",
-                        type: "Apple Development", appID: "7HQ2K4M9XA.*",
-                        issuedAt: cal.date(byAdding: .day, value: -53, to: Date()),
-                        expiresAt: cal.date(byAdding: .day, value: 312, to: Date()),
-                        devices: ["00008120-0012", "00008110-0019", "00008030-0023"],
-                        entitlementsCount: 8, p12Path: "", profilePath: "", keychainKey: "sample.personal",
-                        status: .valid, checkedAt: Date(), inUse: true),
-            Certificate(nickname: "Testes", teamID: "3LP8W2QZ1C", type: "Apple Development",
-                        expiresAt: cal.date(byAdding: .day, value: 6, to: Date()),
-                        p12Path: "", profilePath: "", keychainKey: "sample.test", status: .expiring),
-            Certificate(nickname: "Empresa X", teamID: "9DX4N7T2PB", type: "iPhone Distribution",
-                        expiresAt: cal.date(byAdding: .day, value: -4, to: Date()),
-                        p12Path: "", profilePath: "", keychainKey: "sample.corp", status: .revoked),
-        ]
-        apps = [
-            AppItem(name: "Lumen Player", bundleID: "com.lumen.player", version: "4.2.1",
-                    filePath: Paths.unsigned.appendingPathComponent("lumen.ipa").path, size: 88_080_384),
-            AppItem(name: "Pixel Emu", bundleID: "com.pixel.emu", version: "1.9.3",
-                    filePath: Paths.unsigned.appendingPathComponent("pixel.ipa").path, size: 48_234_496),
-            AppItem(name: "Notas Plus", bundleID: "com.notas.plus", version: "2.8.0",
-                    filePath: Paths.unsigned.appendingPathComponent("notas.ipa").path, size: 23_068_672),
-        ]
     }
 }
 
@@ -142,15 +280,21 @@ struct Settings: Codable {
     var deleteOriginalAfterSign = false
     var autoImportDownloads = true
     var deleteAfterImport = false
-    var installMethod = "localServer"
+    var installMethod = "remoteServer"
+    var serverURL = "https://exploiting-ios.online"
     var appIcon = "graphite"
 
     static func load() -> Settings {
         guard let data = UserDefaults.standard.data(forKey: "settings"),
               let s = try? JSONDecoder().decode(Settings.self, from: data) else { return Settings() }
+        UserDefaults.standard.set(s.serverURL, forKey: "xsign.serverURL")
         return s
     }
+
     func save() {
-        if let data = try? JSONEncoder().encode(self) { UserDefaults.standard.set(data, forKey: "settings") }
+        UserDefaults.standard.set(serverURL, forKey: "xsign.serverURL")
+        if let data = try? JSONEncoder().encode(self) {
+            UserDefaults.standard.set(data, forKey: "settings")
+        }
     }
 }

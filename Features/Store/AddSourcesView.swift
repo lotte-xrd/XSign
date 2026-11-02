@@ -1,8 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// Resultado de adicionar cada fonte. Não usamos `Result` porque o seu tipo de
-/// erro precisa conformar a `Error`, e aqui a falha é só uma mensagem.
+/// Resultado de adicionar cada fonte.
 private enum AddResult {
     case success(Source)
     case failure(String)
@@ -16,8 +15,11 @@ struct AddSourcesView: View {
     @State private var results: [AddResult] = []
 
     private var urls: [URL] {
-        text.split(whereSeparator: \.isNewline)
-            .compactMap { URL(string: $0.trimmingCharacters(in: .whitespaces)) }
+        text.components(separatedBy: .newlines)
+            .flatMap { $0.components(separatedBy: .whitespaces) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.hasPrefix("http://") || $0.hasPrefix("https://") }
+            .compactMap { URL(string: $0) }
     }
 
     var body: some View {
@@ -30,7 +32,9 @@ struct AddSourcesView: View {
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                     Button {
-                        if let s = UIPasteboard.general.string { text = text.isEmpty ? s : text + "\n" + s }
+                        if let s = UIPasteboard.general.string {
+                            text = text.isEmpty ? s : text + "\n" + s
+                        }
                     } label: { Label(L.tr("addsource.paste"), systemImage: "doc.on.clipboard") }
                 } header: {
                     Text(L.tr("addsource.urls"))
@@ -44,7 +48,7 @@ struct AddSourcesView: View {
                             switch results[i] {
                             case .success(let s):
                                 HStack {
-                                    AppIconThumb(name: s.name, size: 32)
+                                    AppIconThumb(name: s.name, url: s.iconURL, size: 32)
                                     VStack(alignment: .leading) {
                                         Text(s.name).font(.subheadline.weight(.semibold))
                                         Text(L.tr("addsource.appcount", s.appCount)).font(.caption).foregroundStyle(.secondary)
@@ -67,8 +71,16 @@ struct AddSourcesView: View {
                     Button(L.tr("common.cancel")) { app.pendingSourceURL = nil; dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(L.tr("addsource.add", urls.count)) { Task { await add() } }
-                        .disabled(urls.isEmpty || working)
+                    Button {
+                        Task { await add() }
+                    } label: {
+                        if working {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text(L.tr("addsource.add", urls.count))
+                        }
+                    }
+                    .disabled(urls.isEmpty || working)
                 }
             }
             .onAppear {
@@ -83,12 +95,16 @@ struct AddSourcesView: View {
         for url in urls {
             do {
                 try await app.addSource(url: url)
-                if let s = app.sources.last { results.append(.success(s)) }
+                if let s = app.sources.first(where: { $0.url.absoluteString.lowercased() == url.absoluteString.lowercased() }) ?? app.sources.last {
+                    results.append(.success(s))
+                }
             } catch {
                 results.append(.failure("\(url.host ?? url.absoluteString): \(error.localizedDescription)"))
             }
         }
         working = false
-        if results.allSatisfy({ if case .success = $0 { return true } else { return false } }) { dismiss() }
+        if !results.isEmpty && results.allSatisfy({ if case .success = $0 { return true } else { return false } }) {
+            dismiss()
+        }
     }
 }

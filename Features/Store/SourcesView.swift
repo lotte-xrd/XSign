@@ -1,9 +1,12 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 struct SourcesView: View {
     @EnvironmentObject private var app: AppState
     @State private var showAdd = false
+    @State private var showImporter = false
+    @State private var shareURL: URL?
 
     var body: some View {
         List {
@@ -18,7 +21,10 @@ struct SourcesView: View {
                         SourceRow(source: source)
                     }
                     .onDelete { idx in idx.map { app.sources[$0] }.forEach(app.removeSource) }
-                    .onMove { app.sources.move(fromOffsets: $0, toOffset: $1) }
+                    .onMove {
+                        app.sources.move(fromOffsets: $0, toOffset: $1)
+                        app.persist()
+                    }
                 } footer: {
                     Text(L.tr("sources.footer"))
                 }
@@ -26,30 +32,50 @@ struct SourcesView: View {
         }
         .navigationTitle(L.tr("store.sources"))
         .navigationBarTitleDisplayMode(.inline)
+        .refreshable {
+            await app.refreshAllSources()
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showAdd = true } label: { Image(systemName: "plus") }
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button { Task { await refreshAll() } } label: { Label(L.tr("sources.refreshAll"), systemImage: "arrow.clockwise") }
-                    Button {} label: { Label(L.tr("sources.import"), systemImage: "tray.and.arrow.down") }
-                    Button {} label: { Label(L.tr("sources.export"), systemImage: "square.and.arrow.up") }
-                    Button { copyAllURLs() } label: { Label(L.tr("sources.copyURLs"), systemImage: "link") }
+                    Button { Task { await app.refreshAllSources() } } label: {
+                        Label(L.tr("sources.refreshAll"), systemImage: "arrow.clockwise")
+                    }
+                    Button { showImporter = true } label: {
+                        Label(L.tr("sources.import"), systemImage: "tray.and.arrow.down")
+                    }
+                    Button { exportSources() } label: {
+                        Label(L.tr("sources.export"), systemImage: "square.and.arrow.up")
+                    }
+                    Button { copyAllURLs() } label: {
+                        Label(L.tr("sources.copyURLs"), systemImage: "link")
+                    }
                 } label: { Image(systemName: "ellipsis.circle") }
             }
         }
         .sheet(isPresented: $showAdd) { AddSourcesView() }
-    }
-
-    private func refreshAll() async {
-        for source in app.sources {
-            try? await app.addSource(url: source.url)
+        .sheet(isPresented: Binding(get: { shareURL != nil }, set: { if !$0 { shareURL = nil } })) {
+            if let shareURL { ShareSheet(items: [shareURL]) }
+        }
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.plainText, .json]) { res in
+            if case .success(let url) = res {
+                _ = try? app.importResource(url: url)
+            }
         }
     }
 
     private func copyAllURLs() {
         UIPasteboard.general.string = app.sources.map { $0.url.absoluteString }.joined(separator: "\n")
+    }
+
+    private func exportSources() {
+        let text = app.sources.map { $0.url.absoluteString }.joined(separator: "\n")
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("xsign-sources.txt")
+        try? text.data(using: .utf8)?.write(to: temp)
+        shareURL = temp
     }
 }
 
@@ -58,7 +84,7 @@ struct SourceRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            AppIconThumb(name: source.name, size: 40)
+            AppIconThumb(name: source.name, url: source.iconURL, size: 40)
             VStack(alignment: .leading, spacing: 1) {
                 Text(source.name).font(.subheadline.weight(.semibold))
                 if let err = source.lastError {

@@ -3,31 +3,49 @@ import SwiftUI
 struct AppDetailView: View {
     @EnvironmentObject private var app: AppState
     let item: SourceApp
+    @State private var signTarget: AppItem?
 
     var body: some View {
         List {
             Section {
-                HStack(spacing: 12) {
-                    AppIconThumb(name: item.name, size: 58)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.name).font(.title3.weight(.bold))
-                        Text([item.developer, item.sourceName].compactMap { $0 }.joined(separator: " · "))
-                            .font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 14) {
+                        AppIconThumb(name: item.name, url: item.iconURL, size: 62)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(item.name).font(.title3.weight(.bold))
+                            Text([item.developer, item.sourceName].compactMap { $0 }.joined(separator: " · "))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
                     }
-                    Spacer()
+
                     if let v = item.latest {
-                        PillButton(title: L.tr("store.get"), filled: true) {
-                            app.downloads.start(name: item.name, url: v.downloadURL)
-                            app.selectedTab = .downloads
+                        HStack(spacing: 10) {
+                            PrimaryButton(title: L.tr("apps.action.sign")) {
+                                signTarget = item.asSignableAppItem()
+                            }
+                            SecondaryButton(title: L.tr("downloads.download"), systemImage: "arrow.down.circle") {
+                                app.downloads.start(
+                                    name: item.name,
+                                    url: v.downloadURL,
+                                    iconURL: item.iconURL,
+                                    bundleID: item.bundleID,
+                                    version: v.version,
+                                    sourceName: item.sourceName
+                                )
+                                app.selectedTab = .downloads
+                            }
                         }
                     }
                 }
+                .padding(.vertical, 4)
             }
             .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 4, leading: Spacing.screen, bottom: 4, trailing: Spacing.screen))
 
             if let latest = item.latest {
                 statRow(latest)
-                if let notes = latest.notes {
+                if let notes = latest.notes, !notes.isEmpty {
                     Section(L.tr("detail.whatsnew")) { Text(notes).font(.subheadline) }
                 }
             }
@@ -43,18 +61,56 @@ struct AppDetailView: View {
                 Section(L.tr("detail.versions")) {
                     ForEach(item.versions.dropFirst(), id: \.version) { v in
                         HStack {
-                            Text("\(v.version) · \(ByteCountFormatter.string(fromByteCount: v.size ?? 0, countStyle: .file))")
-                                .font(.subheadline)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("v\(v.version)").font(.subheadline.weight(.medium))
+                                if let s = v.size, s > 0 {
+                                    Text(ByteCountFormatter.string(fromByteCount: s, countStyle: .file))
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
                             Spacer()
-                            Button { app.downloads.start(name: item.name, url: v.downloadURL) } label: {
+                            Button {
+                                signTarget = AppItem(
+                                    name: item.name,
+                                    bundleID: item.bundleID,
+                                    version: v.version,
+                                    iconPath: nil,
+                                    iconURL: item.iconURL,
+                                    filePath: "",
+                                    downloadURL: v.downloadURL,
+                                    size: v.size ?? 0,
+                                    state: .unsigned,
+                                    origin: item.sourceName
+                                )
+                            } label: {
+                                Image(systemName: "signature")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Color.graphite)
+                            .padding(.trailing, 8)
+
+                            Button {
+                                app.downloads.start(
+                                    name: item.name,
+                                    url: v.downloadURL,
+                                    iconURL: item.iconURL,
+                                    bundleID: item.bundleID,
+                                    version: v.version,
+                                    sourceName: item.sourceName
+                                )
+                                app.selectedTab = .downloads
+                            } label: {
                                 Image(systemName: "arrow.down.circle")
-                            }.buttonStyle(.plain).foregroundStyle(Color.graphite)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Color.graphite)
                         }
                     }
                 }
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $signTarget) { SignView(app: $0) }
     }
 
     private func statRow(_ v: AppVersion) -> some View {
@@ -62,7 +118,7 @@ struct AppDetailView: View {
             HStack {
                 stat(L.tr("detail.version"), v.version)
                 Divider()
-                stat(L.tr("detail.size"), ByteCountFormatter.string(fromByteCount: v.size ?? 0, countStyle: .file))
+                stat(L.tr("detail.size"), (v.size ?? 0) > 0 ? ByteCountFormatter.string(fromByteCount: v.size ?? 0, countStyle: .file) : "—")
             }
         }
     }

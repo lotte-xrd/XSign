@@ -1,7 +1,6 @@
 import Foundation
 
-/// Lê fontes (repositórios) de vários formatos e devolve o modelo interno.
-/// Cada formato tem um adaptador; o resto do app só conhece `SourceApp`.
+/// Lê fontes (repositórios) nos formatos AltStore (v1/v2), ESign, Scarlet e Legado.
 struct SourceService {
 
     enum SourceError: LocalizedError {
@@ -15,104 +14,190 @@ struct SourceService {
     }
 
     /// Baixa e interpreta uma fonte a partir da URL.
-    func fetch(url: URL) async throws -> (source: Source, apps: [SourceApp]) {
+    func fetch(url: URL, existingID: UUID? = nil) async throws -> (source: Source, apps: [SourceApp]) {
         let data: Data
         do {
-            (data, _) = try await URLSession.shared.data(from: url)
+            var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 25)
+            req.setValue("XSign/1.0 (iOS; AltStore/ESign Compatible)", forHTTPHeaderField: "User-Agent")
+            let (d, resp) = try await URLSession.shared.data(for: req)
+            if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                throw SourceError.network
+            }
+            data = d
         } catch {
             throw SourceError.network
         }
-        guard let adapter = Self.detect(data) else { throw SourceError.decode }
-        return try adapter.parse(data, url: url)
-    }
 
-    /// Detecta o formato pelo conteúdo do JSON.
-    static func detect(_ data: Data) -> SourceAdapter? {
-        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        if obj["apps"] != nil { return AltStoreAdapter() }
-        if obj["META"] != nil { return ScarletAdapter() }
-        return LegacyAdapter()
-    }
-}
-
-protocol SourceAdapter {
-    var format: SourceFormat { get }
-    func parse(_ data: Data, url: URL) throws -> (Source, [SourceApp])
-}
-
-// MARK: - AltStore (v1 e v2)
-
-struct AltStoreAdapter: SourceAdapter {
-    let format: SourceFormat = .altstore
-
-    struct Repo: Decodable {
-        var name: String?
-        var identifier: String?
-        var iconURL: URL?
-        var apps: [App]
-    }
-    struct App: Decodable {
-        var name: String
-        var bundleIdentifier: String
-        var developerName: String?
-        var iconURL: URL?
-        var version: String?
-        var versionDate: Date?
-        var downloadURL: URL?
-        var size: Int64?
-        var localizedDescription: String?
-        var versions: [Version]?
-    }
-    struct Version: Decodable {
-        var version: String
-        var date: Date?
-        var size: Int64?
-        var downloadURL: URL
-        var localizedDescription: String?
-    }
-
-    func parse(_ data: Data, url: URL) throws -> (Source, [SourceApp]) {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let repo = try decoder.decode(Repo.self, from: data)
-        let sourceID = UUID()
-        let source = Source(id: sourceID, url: url, name: repo.name ?? url.host ?? "Source",
-                            iconURL: repo.iconURL, format: format,
-                            lastFetched: Date(), order: 0, appCount: repo.apps.count)
-        let apps: [SourceApp] = repo.apps.map { a in
-            let versions: [AppVersion]
-            if let vs = a.versions, !vs.isEmpty {
-                versions = vs.map { AppVersion(version: $0.version, downloadURL: $0.downloadURL,
-                                               size: $0.size, date: $0.date, notes: $0.localizedDescription) }
-            } else if let dl = a.downloadURL {
-                versions = [AppVersion(version: a.version ?? "1.0", downloadURL: dl, size: a.size,
-                                       date: a.versionDate, notes: a.localizedDescription)]
-            } else {
-                versions = []
-            }
-            return SourceApp(name: a.name, bundleID: a.bundleIdentifier, developer: a.developerName,
-                             iconURL: a.iconURL, sourceID: sourceID, sourceName: source.name,
-                             versions: versions)
+        let sourceID = existingID ?? UUID()
+        guard let result = Self.parseAnyRepo(data: data, url: url, sourceID: sourceID) else {
+            throw SourceError.decode
         }
-        return (source, apps)
+        return result
     }
-}
 
-// MARK: - Scarlet e legado (esqueletos a completar com fontes reais)
+    // MARK: - Parser Universal (AltStore v1/v2, ESign, Scarlet, Feather, JSON Array)
 
-struct ScarletAdapter: SourceAdapter {
-    let format: SourceFormat = .scarlet
-    func parse(_ data: Data, url: URL) throws -> (Source, [SourceApp]) {
-        // TODO: mapear a chave META e as listas por categoria do formato Scarlet.
-        // Testar com uma fonte real antes de confiar neste caminho.
-        throw SourceService.SourceError.decode
+    private static func parseAnyRepo(data: Data, url: URL, sourceID: UUID) -> (Source, [SourceApp])? {
+        guard let raw = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) else {
+            return nil
+        }
+
+        if let dict = raw as? [String: Any] {
+            let repoName = (dict["name"] as? String)
+                ?? ((dict["META"] as? [String: Any])?["repoName"] as? String)
+                ?? ((dict["META"] as? [String: Any])?["name"] as? String)
+                ?? url.host
+                ?? "Source"
+
+            let subtitle = (dict["subtitle"] as? String) ?? (dict["description"] as? String)
+            let repoIcon = parseURL(dict["iconURL"] ?? dict["icon"] ?? (dict["META"] as? [String: Any])?["icon"])
+
+            var format: SourceFormat = .altstore
+            var rawApps: [[String: Any]] = []
+
+            if let apps = dict["apps"] as? [[String: Any]] {
+                rawApps = apps
+                format = .altstore
+            } else if dict["META"] != nil {
+                format = .scarlet
+                for (key, value) in dict where key != "META" {
+                    if let arr = value as? [[String: Any]] {
+                        rawApps.append(contentsOf: arr)
+                    }
+                }
+            } else if let dataArr = dict["data"] as? [[String: Any]] {
+                format = .legacy
+                rawApps = dataArr
+            }
+
+            let parsedApps = rawApps.compactMap { parseAppDict($0, sourceID: sourceID, sourceName: repoName) }
+            guard !parsedApps.isEmpty || dict["apps"] != nil else { return nil }
+
+            let source = Source(
+                id: sourceID,
+                url: url,
+                name: repoName,
+                subtitle: subtitle,
+                iconURL: repoIcon,
+                format: format,
+                lastFetched: Date(),
+                lastError: nil,
+                order: 0,
+                appCount: parsedApps.count
+            )
+            return (source, parsedApps)
+        } else if let array = raw as? [[String: Any]] {
+            let repoName = url.host ?? "Source"
+            let parsedApps = array.compactMap { parseAppDict($0, sourceID: sourceID, sourceName: repoName) }
+            guard !parsedApps.isEmpty else { return nil }
+            let source = Source(
+                id: sourceID,
+                url: url,
+                name: repoName,
+                format: .legacy,
+                lastFetched: Date(),
+                order: 0,
+                appCount: parsedApps.count
+            )
+            return (source, parsedApps)
+        }
+
+        return nil
     }
-}
 
-struct LegacyAdapter: SourceAdapter {
-    let format: SourceFormat = .legacy
-    func parse(_ data: Data, url: URL) throws -> (Source, [SourceApp]) {
-        // TODO: JSONs antigos com downloadURL solto, sem a estrutura do AltStore.
-        throw SourceService.SourceError.decode
+    private static func parseAppDict(_ d: [String: Any], sourceID: UUID, sourceName: String) -> SourceApp? {
+        guard let name = (d["name"] as? String) ?? (d["appName"] as? String),
+              !name.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return nil
+        }
+
+        let bundleID = (d["bundleIdentifier"] as? String)
+            ?? (d["bundleID"] as? String)
+            ?? (d["bundleId"] as? String)
+            ?? "com.repo.\(name.lowercased().replacingOccurrences(of: " ", with: ""))"
+
+        let developer = (d["developerName"] as? String)
+            ?? (d["developer"] as? String)
+            ?? (d["author"] as? String)
+
+        let subtitle = (d["subtitle"] as? String) ?? (d["localizedDescription"] as? String)
+        let iconURL = parseURL(d["iconURL"] ?? d["icon"] ?? d["image"])
+
+        var versions: [AppVersion] = []
+        if let rawVersions = d["versions"] as? [[String: Any]], !rawVersions.isEmpty {
+            versions = rawVersions.compactMap { v in
+                guard let dl = parseURL(v["downloadURL"] ?? v["down"] ?? v["url"]) else { return nil }
+                let ver = String(describing: v["version"] ?? d["version"] ?? "1.0")
+                let size = parseSize(v["size"] ?? d["size"])
+                let date = parseDate(v["date"] ?? v["versionDate"] ?? d["versionDate"])
+                let notes = (v["localizedDescription"] as? String) ?? (v["notes"] as? String) ?? (d["localizedDescription"] as? String)
+                let sha = v["sha256"] as? String
+                return AppVersion(version: ver, downloadURL: dl, size: size, date: date, notes: notes, sha256: sha)
+            }
+        }
+
+        if versions.isEmpty, let dl = parseURL(d["downloadURL"] ?? d["down"] ?? d["url"]) {
+            let ver = String(describing: d["version"] ?? "1.0")
+            let size = parseSize(d["size"])
+            let date = parseDate(d["versionDate"] ?? d["date"] ?? d["fullDate"])
+            let notes = (d["localizedDescription"] as? String) ?? (d["description"] as? String)
+            versions = [AppVersion(version: ver, downloadURL: dl, size: size, date: date, notes: notes)]
+        }
+
+        guard !versions.isEmpty else { return nil }
+
+        return SourceApp(
+            name: name,
+            bundleID: bundleID,
+            developer: developer,
+            subtitle: subtitle,
+            category: d["category"] as? String,
+            iconURL: iconURL,
+            sourceID: sourceID,
+            sourceName: sourceName,
+            versions: versions
+        )
+    }
+
+    private static func parseURL(_ raw: Any?) -> URL? {
+        guard let s = raw as? String else { return nil }
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let u = URL(string: trimmed) { return u }
+        if let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            return URL(string: encoded)
+        }
+        return nil
+    }
+
+    private static func parseSize(_ raw: Any?) -> Int64? {
+        if let i = raw as? Int64 { return i }
+        if let i = raw as? Int { return Int64(i) }
+        if let d = raw as? Double { return Int64(d) }
+        if let s = raw as? String {
+            let digits = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let v = Int64(digits) { return v }
+        }
+        return nil
+    }
+
+    private static func parseDate(_ raw: Any?) -> Date? {
+        if let t = raw as? TimeInterval {
+            return t > 10_000_000_000 ? Date(timeIntervalSince1970: t / 1000) : Date(timeIntervalSince1970: t)
+        }
+        guard let str = raw as? String, !str.isEmpty else { return nil }
+
+        let iso = ISO8601DateFormatter()
+        if let d = iso.date(from: str) { return d }
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = iso.date(from: str) { return d }
+
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        for fmt in ["yyyy-MM-dd", "yyyy-MM-dd'T'HH:mm:ssZ", "yyyy-MM-dd HH:mm:ss", "dd/MM/yyyy", "MM/dd/yyyy"] {
+            df.dateFormat = fmt
+            if let d = df.date(from: str) { return d }
+        }
+        return nil
     }
 }

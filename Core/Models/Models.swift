@@ -8,6 +8,7 @@ struct Source: Identifiable, Codable, Hashable {
     var id: UUID = UUID()
     var url: URL
     var name: String
+    var subtitle: String?
     var iconURL: URL?
     var format: SourceFormat = .altstore
     var lastFetched: Date?
@@ -16,18 +17,37 @@ struct Source: Identifiable, Codable, Hashable {
     var appCount: Int = 0
 }
 
-/// Um app listado por uma fonte. Vem do cache, não é persistido no store.
+/// Um app listado por uma fonte.
 struct SourceApp: Identifiable, Codable, Hashable {
     var id: String { bundleID + "@" + (sourceID?.uuidString ?? "") }
     var name: String
     var bundleID: String
     var developer: String?
+    var subtitle: String?
+    var category: String?
     var iconURL: URL?
     var sourceID: UUID?
     var sourceName: String?
     var versions: [AppVersion]
 
     var latest: AppVersion? { versions.first }
+
+    /// Converte um item da Loja em um `AppItem` pronto para assinatura direta (Modo B via URL).
+    func asSignableAppItem() -> AppItem? {
+        guard let v = latest else { return nil }
+        return AppItem(
+            name: name,
+            bundleID: bundleID,
+            version: v.version,
+            iconPath: nil,
+            iconURL: iconURL,
+            filePath: "",
+            downloadURL: v.downloadURL,
+            size: v.size ?? 0,
+            state: .unsigned,
+            origin: sourceName
+        )
+    }
 }
 
 struct AppVersion: Codable, Hashable {
@@ -47,10 +67,15 @@ struct DownloadTask: Identifiable, Codable, Hashable {
     var id: UUID = UUID()
     var url: URL
     var name: String
+    var iconURL: URL? = nil
+    var bundleID: String? = nil
+    var version: String? = nil
+    var sourceName: String? = nil
     var bytesWritten: Int64 = 0
     var totalBytes: Int64 = 0
     var state: DownloadState = .queued
     var error: String?
+    var localPath: String? = nil
 
     var fraction: Double {
         guard totalBytes > 0 else { return 0 }
@@ -68,13 +93,23 @@ struct AppItem: Identifiable, Codable, Hashable {
     var bundleID: String
     var version: String
     var iconPath: String?
+    var iconURL: URL? = nil
     var filePath: String
+    var downloadURL: URL? = nil
     var size: Int64
     var state: AppState2 = .unsigned
     var certificateID: UUID?
     var certificateName: String?
     var signedAt: Date?
     var origin: String?
+    /// Link itms-services:// retornado pelo servidor após assinar
+    var installURL: String? = nil
+    /// Link HTTPS direto do .ipa assinado no servidor
+    var signedDownloadURL: String? = nil
+    /// Link da página pública de instalação (/install/:token)
+    var shareURL: String? = nil
+    /// Data de expiração do link OTA no servidor
+    var expiresAt: Date? = nil
 }
 
 // MARK: - Certificado
@@ -118,6 +153,7 @@ struct Certificate: Identifiable, Codable, Hashable {
     var p12Path: String
     var profilePath: String
     var keychainKey: String
+    var password: String = "1"
     var status: CertStatus = .unknown
     var checkedAt: Date?
     var inUse: Bool = false
@@ -185,5 +221,12 @@ struct SignProgress: Equatable {
     var fraction: Double
     var finished: Bool = false
     var outputPath: String?
+    var installURL: String?
+    var downloadURL: String?
+    var shareURL: String?
+    var finalName: String?
+    var finalBundleID: String?
+    var finalVersion: String?
+    var fileSize: Int64?
     var error: String?
 }

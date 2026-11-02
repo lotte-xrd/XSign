@@ -53,6 +53,8 @@ targets:
           - CFBundleURLName: com.xsign.scheme
             CFBundleURLSchemes:
               - xsign
+        LSApplicationQueriesSchemes:
+          - itms-services
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.xsign.app
