@@ -162,6 +162,78 @@ struct CertificateService {
         )
     }
 
+    /// Detecta e importa automaticamente o certificado com o qual o próprio XSign foi instalado!
+    /// 1) Procura primeiro em `Bundle.main/BundledCert` (caso o servidor tenha embutido `.p12` + `.mobileprovision`).
+    /// 2) Caso contrário, lê o `embedded.mobileprovision` que o `zsign` coloca nativamente em `Payload/XSign.app/embedded.mobileprovision`
+    ///    e cria o certificado vinculado ao servidor (`p12Path = "SERVER_MATCH"`).
+    func importEmbeddedAppCertificate(makeActive: Bool = true) -> Certificate? {
+        if let resourceURL = Bundle.main.resourceURL {
+            let bundledDir = resourceURL.appendingPathComponent("BundledCert", isDirectory: true)
+            let searchDirs = [bundledDir, resourceURL]
+
+            for dir in searchDirs {
+                guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
+                if let zipFile = files.first(where: { $0.pathExtension.lowercased() == "zip" }),
+                   let cert = try? importFromZip(url: zipFile, makeActive: makeActive) {
+                    return cert
+                }
+                if let p12File = files.first(where: { ["p12", "pfx"].contains($0.pathExtension.lowercased()) }),
+                   let provFile = files.first(where: { $0.pathExtension.lowercased() == "mobileprovision" && $0.lastPathComponent != "embedded.mobileprovision" })
+                        ?? files.first(where: { $0.pathExtension.lowercased() == "mobileprovision" }),
+                   let p12Data = try? Data(contentsOf: p12File),
+                   let provData = try? Data(contentsOf: provFile) {
+                    var passCandidates = ["1", "1234", "123456", "password", ""]
+                    if let txtFile = files.first(where: { $0.pathExtension.lowercased() == "txt" }),
+                       let txt = try? String(contentsOf: txtFile, encoding: .utf8) {
+                        let lines = txt.components(separatedBy: .newlines)
+                            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                            .filter { !$0.isEmpty }
+                        passCandidates.insert(contentsOf: lines, at: 0)
+                    }
+                    let pass = passCandidates.first(where: { validateP12(data: p12Data, password: $0) }) ?? "1"
+                    if let cert = try? saveCertificate(p12Data: p12Data, profileData: provData, password: pass, nickname: nil, makeActive: makeActive) {
+                        return cert
+                    }
+                }
+            }
+        }
+
+        // Fallback universal: lê o `embedded.mobileprovision` que o zsign sempre embute ao assinar o XSign
+        guard let embeddedURL = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+              let provData = try? Data(contentsOf: embeddedURL),
+              let info = try? readProfile(data: provData) else {
+            return nil
+        }
+
+        let certID = UUID()
+        let folder = Paths.certs.appendingPathComponent(certID.uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let provURL = folder.appendingPathComponent("profile.mobileprovision")
+        try? provData.write(to: provURL, options: .atomic)
+
+        let resolvedNick = info.teamName ?? info.name ?? "Certificado \(info.teamID)"
+
+        return Certificate(
+            id: certID,
+            nickname: resolvedNick,
+            teamID: info.teamID,
+            teamName: info.teamName,
+            type: info.type,
+            appID: info.appID,
+            issuedAt: info.issuedAt,
+            expiresAt: info.expiresAt,
+            devices: info.devices,
+            entitlementsCount: info.entitlementsCount,
+            p12Path: "SERVER_MATCH",
+            profilePath: Paths.relative(provURL),
+            keychainKey: "cert.password.\(certID.uuidString)",
+            password: "1",
+            status: status(expiresAt: info.expiresAt),
+            checkedAt: Date(),
+            inUse: makeActive
+        )
+    }
+
     /// Exporta um certificado em `.zip` para compartilhamento.
     func exportCertificateZip(_ cert: Certificate) throws -> URL {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("cert-export-\(UUID().uuidString)", isDirectory: true)

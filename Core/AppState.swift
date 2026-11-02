@@ -98,9 +98,58 @@ final class AppState: ObservableObject {
         sourceApps = await Store.shared.load([SourceApp].self, from: "sourceAppsCache")
         ensureBuiltInXSign()
 
+        // Se nenhum certificado foi importado ainda, importa automaticamente o certificado que instalou o próprio XSign
+        if certificates.isEmpty, let embeddedCert = certificateService.importEmbeddedAppCertificate(makeActive: true) {
+            certificates.append(embeddedCert)
+            persist()
+        }
+
         // Atualiza status de validade dos certificados carregados
         for i in certificates.indices {
             certificates[i].status = certificateService.status(expiresAt: certificates[i].expiresAt)
+        }
+
+        // Na primeira abertura, já deixa o próprio XSign importado em Apps vinculado ao certificado instalado
+        if !UserDefaults.standard.bool(forKey: "xsign.seededOwnApp") {
+            UserDefaults.standard.set(true, forKey: "xsign.seededOwnApp")
+            let releaseURL = URL(string: "https://github.com/lotte-xrd/XSign/releases/download/latest/XSign-unsigned.ipa")
+            let activeCert = currentCertificate
+            let ownUnsigned = AppItem(
+                name: "XSign",
+                bundleID: Bundle.main.bundleIdentifier ?? "com.xsign.app",
+                version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0",
+                iconPath: nil,
+                iconURL: nil,
+                filePath: "",
+                downloadURL: releaseURL,
+                size: 0,
+                state: .unsigned,
+                certificateID: activeCert?.id,
+                certificateName: activeCert?.nickname,
+                origin: "XSign Official"
+            )
+            if !apps.contains(where: { $0.name == "XSign" && $0.state == .unsigned }) {
+                apps.insert(ownUnsigned, at: 0)
+            }
+            if let cert = activeCert, !apps.contains(where: { $0.name == "XSign" && $0.state == .signed }) {
+                let ownSigned = AppItem(
+                    name: "XSign",
+                    bundleID: Bundle.main.bundleIdentifier ?? "com.xsign.app",
+                    version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0",
+                    iconPath: nil,
+                    iconURL: nil,
+                    filePath: "",
+                    downloadURL: releaseURL,
+                    size: 0,
+                    state: .signed,
+                    certificateID: cert.id,
+                    certificateName: cert.nickname,
+                    signedAt: Date(),
+                    origin: "XSign Official"
+                )
+                apps.append(ownSigned)
+            }
+            persist()
         }
 
         try? await Task.sleep(nanoseconds: 350_000_000)

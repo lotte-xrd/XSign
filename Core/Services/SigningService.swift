@@ -60,10 +60,13 @@ struct RemoteSigningService: SigningService {
                 steps[0].state = .running(detail: certificate.nickname)
                 emit(0.1)
 
-                // 1. Ler arquivos reais do certificado (.p12 + .mobileprovision)
+                // 1. Ler arquivos reais do certificado (.p12 local ou SERVER_MATCH + .mobileprovision)
+                let isServerMatchedCert = (certificate.p12Path == "SERVER_MATCH")
                 let p12URL = Paths.resolve(certificate.p12Path)
                 let provURL = Paths.resolve(certificate.profilePath)
-                guard let p12Data = try? Data(contentsOf: p12URL), !p12Data.isEmpty else {
+                let p12Data = isServerMatchedCert ? nil : (try? Data(contentsOf: p12URL))
+
+                if !isServerMatchedCert && (p12Data == nil || p12Data?.isEmpty == true) {
                     let msg = "Arquivo .p12 do certificado não encontrado. Reimporte o certificado em Ajustes."
                     steps[0].state = .failed(msg)
                     emit(0.1, error: msg)
@@ -113,6 +116,9 @@ struct RemoteSigningService: SigningService {
                         p12Data: p12Data,
                         provData: provData,
                         password: password,
+                        teamID: certificate.teamID,
+                        appID: certificate.appID,
+                        certName: certificate.nickname,
                         customName: customName,
                         customBundleID: customBundle,
                         customVersion: customVersion,
@@ -188,9 +194,12 @@ struct RemoteSigningService: SigningService {
     private static func writeMultipartBody(
         to fileURL: URL,
         boundary: String,
-        p12Data: Data,
+        p12Data: Data?,
         provData: Data,
         password: String,
+        teamID: String,
+        appID: String?,
+        certName: String,
         customName: String,
         customBundleID: String,
         customVersion: String,
@@ -229,7 +238,14 @@ struct RemoteSigningService: SigningService {
         try appendField(name: "customBundleId", value: customBundleID)
         try appendField(name: "customVersion", value: customVersion)
 
-        try appendFileData(name: "p12", filename: "certificate.p12", mimeType: "application/x-pkcs12", data: p12Data)
+        if let p12Data, !p12Data.isEmpty {
+            try appendFileData(name: "p12", filename: "certificate.p12", mimeType: "application/x-pkcs12", data: p12Data)
+        } else {
+            try appendField(name: "useServerCert", value: "true")
+            try appendField(name: "certTeamId", value: teamID)
+            if let appID { try appendField(name: "certAppId", value: appID) }
+            try appendField(name: "certName", value: certName)
+        }
         try appendFileData(name: "mobileprovision", filename: "profile.mobileprovision", mimeType: "application/x-apple-aspen-config", data: provData)
 
         if let remoteIPAURL {
