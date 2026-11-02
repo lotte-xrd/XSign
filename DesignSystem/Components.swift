@@ -211,6 +211,10 @@ struct AppIconThumb: View {
                 return img
             }
         }
+        if name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "xsign",
+           let builtInIcon = UIImage(named: "XSignStoreIcon") {
+            return builtInIcon
+        }
         return nil
     }
 

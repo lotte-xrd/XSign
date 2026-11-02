@@ -4,10 +4,30 @@ import Combine
 /// Estado central do app: dados reais persistidos, serviços e preferências.
 @MainActor
 final class AppState: ObservableObject {
-    @Published var selectedTab: AppTab = .store
+    @Published var selectedTab: AppTab = .apps
+
+    static let builtInXSignApp = SourceApp(
+        name: "XSign",
+        bundleID: "com.xsign.app",
+        developer: "Lotte",
+        subtitle: "Assinador .IPA e instalador OTA oficial do Exploiting iOS",
+        category: "Utilities",
+        iconURL: nil,
+        sourceID: nil,
+        sourceName: "XSign Official",
+        versions: [
+            AppVersion(
+                version: "1.0.0",
+                downloadURL: URL(string: "https://github.com/lotte-xrd/XSign/releases/download/latest/XSign-unsigned.ipa")!,
+                size: nil,
+                date: Date(),
+                notes: "Versão oficial do XSign desenvolvida por Lotte (Exploiting iOS). Permite assinar e instalar qualquer .IPA direto no seu iPhone."
+            )
+        ]
+    )
 
     @Published var sources: [Source] = []
-    @Published var sourceApps: [SourceApp] = []
+    @Published var sourceApps: [SourceApp] = [AppState.builtInXSignApp]
     @Published var apps: [AppItem] = []
     @Published var certificates: [Certificate] = []
     @Published var settings = Settings.load()
@@ -56,6 +76,7 @@ final class AppState: ObservableObject {
         certificates = await Store.shared.load([Certificate].self, from: "certificates")
         sources = await Store.shared.load([Source].self, from: "sources")
         sourceApps = await Store.shared.load([SourceApp].self, from: "sourceAppsCache")
+        ensureBuiltInXSign()
 
         // Atualiza status de validade dos certificados carregados
         for i in certificates.indices {
@@ -122,6 +143,7 @@ final class AppState: ObservableObject {
         }
         sourceApps.removeAll { $0.sourceID == source.id }
         sourceApps.append(contentsOf: result.apps)
+        ensureBuiltInXSign()
         persist()
     }
 
@@ -129,12 +151,19 @@ final class AppState: ObservableObject {
         for source in sources {
             try? await addSource(url: source.url)
         }
+        ensureBuiltInXSign()
     }
 
     func removeSource(_ source: Source) {
         sources.removeAll { $0.id == source.id }
         sourceApps.removeAll { $0.sourceID == source.id }
+        ensureBuiltInXSign()
         persist()
+    }
+
+    private func ensureBuiltInXSign() {
+        sourceApps.removeAll { $0.bundleID == AppState.builtInXSignApp.bundleID && $0.sourceID == nil }
+        sourceApps.insert(AppState.builtInXSignApp, at: 0)
     }
 
     // MARK: - Importador Universal de Recursos (.ipa, .zip, .p12, .mobileprovision, .deb, .dylib, .json)

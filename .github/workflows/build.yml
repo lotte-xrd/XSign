@@ -9,6 +9,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-14
@@ -58,3 +61,10 @@ jobs:
           name: XSign-unsigned-ipa
           path: ${{ runner.temp }}/XSign-unsigned.ipa
           if-no-files-found: error
+
+      - name: Publicar Release Latest para a Loja do XSign
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view latest >/dev/null 2>&1 || gh release create latest --title "XSign Latest" --notes "Build oficial do XSign (Exploiting iOS)"
+          gh release upload latest "$RUNNER_TEMP/XSign-unsigned.ipa" --clobber

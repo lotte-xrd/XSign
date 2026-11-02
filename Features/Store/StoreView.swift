@@ -55,6 +55,23 @@ struct StoreView: View {
                                 }
                             }
                         }
+                        Section {
+                            Button {
+                                showAddSheet = true
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "plus.circle.fill")
+                                        .foregroundStyle(Color.graphite)
+                                    Text(L.tr("addsource.title"))
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(Color.graphite)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
                     }
                     .refreshable {
                         await app.refreshAllSources()

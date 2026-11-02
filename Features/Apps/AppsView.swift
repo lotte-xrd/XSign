@@ -9,6 +9,7 @@ struct AppsView: View {
     @State private var signTarget: AppItem?
     @State private var quickSignTarget: AppItem?
     @State private var showIPAImporter = false
+    @State private var showCertImporter = false
     @State private var shareItems: [Any] = []
     @State private var showShare = false
     @State private var errorAlertMessage: String?
@@ -25,6 +26,87 @@ struct AppsView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                // Card principal bem visível para importar .IPA
+                VStack(spacing: 10) {
+                    Button {
+                        showIPAImporter = true
+                    } label: {
+                        HStack(spacing: 14) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(Color.graphite)
+                                    .frame(width: 46, height: 46)
+                                Image(systemName: "plus.app.fill")
+                                    .font(.title3.weight(.semibold))
+                                    .foregroundStyle(Color.onGraphite)
+                            }
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Importar arquivo .IPA")
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundStyle(Color.graphite)
+                                Text("Toque aqui para escolher um .ipa do seu iPhone")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 6)
+                            Text("IMPORTAR")
+                                .font(.caption2.weight(.bold))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .foregroundStyle(Color.onGraphite)
+                                .background(Color.graphite, in: Capsule())
+                        }
+                        .padding(12)
+                        .background(Color.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(Color.hairline, lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    // Status rápido do certificado
+                    if let cert = app.currentCertificate {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.seal.fill")
+                                .font(.caption)
+                                .foregroundStyle(Color.moss)
+                            Text("Certificado ativo: \(cert.nickname)")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            Spacer()
+                            StatusBadge(status: cert.status)
+                        }
+                        .padding(.horizontal, 4)
+                    } else {
+                        Button {
+                            showCertImporter = true
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "exclamationmark.shield.fill")
+                                    .foregroundStyle(Color.ochre)
+                                Text("Importe seu certificado (.p12 + .mobileprovision) para assinar")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(Color.graphite)
+                                    .lineLimit(1)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 9)
+                            .background(Color.ochre.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, Spacing.screen)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+
                 Picker("", selection: $segment) {
                     Text(L.tr("apps.unsigned", app.apps.filter { $0.state == .unsigned }.count)).tag(AppState2.unsigned)
                     Text(L.tr("apps.signed", app.apps.filter { $0.state == .signed }.count)).tag(AppState2.signed)
@@ -33,12 +115,23 @@ struct AppsView: View {
                 .padding(.horizontal, Spacing.screen).padding(.vertical, 8)
 
                 if list.isEmpty {
-                    VStack(spacing: 14) {
-                        EmptyStateView(title: L.tr("apps.empty.title"), message: L.tr("apps.empty.message"))
+                    VStack(spacing: 16) {
+                        EmptyStateView(
+                            title: segment == .unsigned ? "Nenhum .IPA importado ainda" : L.tr("apps.empty.title"),
+                            message: segment == .unsigned
+                                ? "Toque no botão abaixo ou no card acima para escolher qualquer arquivo .IPA salvo no seu iPhone e assinar em segundos."
+                                : "Quando você assinar um app, ele aparecerá aqui pronto para instalar."
+                        )
                         if segment == .unsigned {
-                            PillButton(title: L.tr("files.import"), filled: true) {
-                                showIPAImporter = true
+                            VStack(spacing: 10) {
+                                PrimaryButton(title: "Escolher arquivo .IPA no iPhone") {
+                                    showIPAImporter = true
+                                }
+                                SecondaryButton(title: "Explorar a Loja de Apps", systemImage: "square.grid.2x2") {
+                                    app.selectedTab = .store
+                                }
                             }
+                            .padding(.horizontal, 32)
                         }
                     }
                     Spacer()
@@ -46,9 +139,11 @@ struct AppsView: View {
                     List {
                         ForEach(list) { item in
                             Button { actionTarget = item } label: {
-                                AppRow(item: item) {
-                                    installApp(item)
-                                }
+                                AppRow(
+                                    item: item,
+                                    onSign: { signTarget = item },
+                                    onInstall: { installApp(item) }
+                                )
                             }
                             .buttonStyle(.plain)
                             .swipeActions {
@@ -65,7 +160,9 @@ struct AppsView: View {
             .searchable(text: $query, prompt: L.tr("common.search"))
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showIPAImporter = true } label: { Image(systemName: "plus") }
+                    Button { showIPAImporter = true } label: {
+                        Label("Importar .IPA", systemImage: "plus.circle.fill")
+                    }
                 }
             }
             .confirmationDialog(actionTarget?.name ?? "", isPresented: .init(
@@ -74,6 +171,7 @@ struct AppsView: View {
                 if let item = actionTarget { actionButtons(for: item) }
             }
             .sheet(item: $signTarget) { SignView(app: $0) }
+            .sheet(isPresented: $showCertImporter) { ImportCertificateView() }
             .fullScreenCover(item: $quickSignTarget) { target in
                 if let cert = app.currentCertificate {
                     SignProgressView(app: target, certificate: cert, options: SignOptions(name: target.name, bundleID: target.bundleID, version: target.version))
@@ -165,6 +263,7 @@ struct AppsView: View {
 
 struct AppRow: View {
     let item: AppItem
+    var onSign: (() -> Void)? = nil
     var onInstall: (() -> Void)? = nil
 
     var body: some View {
@@ -172,8 +271,13 @@ struct AppRow: View {
             AppIconThumb(name: item.name, iconPath: item.iconPath, url: item.iconURL, size: 44)
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                Text("\(item.version) · \(item.bundleID)")
-                    .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                HStack(spacing: 4) {
+                    Text("\(item.version) · \(item.bundleID)")
+                    if item.size > 0 {
+                        Text("· \(ByteCountFormatter.string(fromByteCount: item.size, countStyle: .file))")
+                    }
+                }
+                .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
                 if item.state == .signed, let certName = item.certificateName {
                     Text(certName).font(.caption2).foregroundStyle(Color.moss).lineLimit(1)
                 }
@@ -183,9 +287,10 @@ struct AppRow: View {
                 PillButton(title: L.tr("apps.action.install"), filled: true) {
                     onInstall?()
                 }
-            } else if item.size > 0 {
-                Text(ByteCountFormatter.string(fromByteCount: item.size, countStyle: .file))
-                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                PillButton(title: L.tr("apps.action.sign"), filled: true) {
+                    onSign?()
+                }
             }
         }
     }
