@@ -90,9 +90,9 @@ struct AppsView: View {
             }
             .sheet(isPresented: $showIPAImporter) {
                 DocumentPicker(allowsMultipleSelection: true) { urls in
-                    for u in urls {
+                    Task {
                         do {
-                            _ = try app.importResource(url: u)
+                            _ = try await app.importResourcesWithHUD(urls: urls)
                         } catch {
                             errorAlertMessage = error.localizedDescription
                         }

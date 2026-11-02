@@ -234,3 +234,12 @@
 "store.xsign.notes" = "Versión oficial de XSign por Lotte (Exploiting iOS).";
 "import.error.emptyClipboard" = "El portapapeles está vacío.";
 "import.error.invalidURL" = "URL no válida.";
+
+/* Carga y Apertura */
+"loading.boot.certs" = "Verificando certificados…";
+"loading.boot.sources" = "Cargando fuentes…";
+"loading.boot.ready" = "Listo";
+"loading.hud.importingIPA" = "Importando .ipa…";
+"loading.hud.importingCert" = "Importando certificado…";
+"loading.hud.importingResource" = "Importando recurso…";
+"loading.hud.refreshingSources" = "Actualizando fuentes…";

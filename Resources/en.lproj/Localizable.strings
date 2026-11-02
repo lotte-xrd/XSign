@@ -234,3 +234,12 @@
 "store.xsign.notes" = "Official build of XSign by Lotte (Exploiting iOS).";
 "import.error.emptyClipboard" = "Clipboard is empty.";
 "import.error.invalidURL" = "Invalid URL.";
+
+/* Loading & Splash */
+"loading.boot.certs" = "Checking certificates…";
+"loading.boot.sources" = "Loading sources…";
+"loading.boot.ready" = "Ready";
+"loading.hud.importingIPA" = "Importing .ipa…";
+"loading.hud.importingCert" = "Importing certificate…";
+"loading.hud.importingResource" = "Importing resource…";
+"loading.hud.refreshingSources" = "Refreshing sources…";

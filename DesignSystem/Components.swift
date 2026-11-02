@@ -312,3 +312,123 @@ struct DocumentPicker: UIViewControllerRepresentable {
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {}
     }
 }
+
+// MARK: - 1. Splash Animada de Abertura (Boot Screen)
+
+struct SplashView: View {
+    var progress: Double
+    var statusText: String
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack {
+            Color.stoneBG.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                Spacer()
+
+                VStack(spacing: 14) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Color.fill.opacity(0.65))
+                            .frame(width: 68, height: 68)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .stroke(Color.hairline, lineWidth: 1)
+                            )
+
+                        XGlyph()
+                            .fill(Color.graphite)
+                            .frame(width: 32, height: 32)
+                            .scaleEffect(pulse ? 0.93 : 1.0)
+                            .opacity(pulse ? 0.78 : 1.0)
+                    }
+
+                    Text("XSign")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.graphite)
+
+                    SignatureLine(progress: progress)
+                        .frame(width: 132)
+                        .animation(.easeInOut(duration: 0.35), value: progress)
+
+                    Text(statusText)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
+                }
+
+                Spacer()
+
+                Text("Exploiting iOS")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary.opacity(0.45))
+                    .padding(.bottom, 24)
+            }
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
+    }
+}
+
+// MARK: - 2. HUD Overlay de Carregamento (Importar .ipa, Certificados, Fontes)
+
+struct LoadingHUDView: View {
+    let title: String
+    @State private var pulse = false
+    @State private var slide = false
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.18)
+                .ignoresSafeArea()
+
+            VStack(spacing: 11) {
+                XGlyph()
+                    .fill(Color.graphite)
+                    .frame(width: 24, height: 24)
+                    .scaleEffect(pulse ? 0.92 : 1.0)
+                    .opacity(pulse ? 0.76 : 1.0)
+
+                Text(title)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.graphite)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.hairline)
+                        Capsule()
+                            .fill(Color.graphite)
+                            .frame(width: geo.size.width * 0.45)
+                            .offset(x: slide ? geo.size.width * 0.65 : -geo.size.width * 0.1)
+                    }
+                    .clipShape(Capsule())
+                }
+                .frame(width: 96, height: 3)
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 18)
+            .frame(minWidth: 164)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.hairline.opacity(0.8), lineWidth: 0.8)
+            )
+            .shadow(color: .black.opacity(0.14), radius: 16, y: 6)
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+            withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
+                slide = true
+            }
+        }
+    }
+}

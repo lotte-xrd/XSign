@@ -54,18 +54,15 @@ struct ImportResourceView: View {
             }
             .sheet(isPresented: $showPicker) {
                 DocumentPicker(allowsMultipleSelection: true) { urls in
-                    errorMessage = nil
-                    var lastMsg: String?
-                    for u in urls {
+                    Task {
+                        errorMessage = nil
                         do {
-                            lastMsg = try app.importResource(url: u)
+                            let lastMsg = try await app.importResourcesWithHUD(urls: urls)
+                            statusMessage = lastMsg
+                            dismiss()
                         } catch {
                             errorMessage = error.localizedDescription
                         }
-                    }
-                    if errorMessage == nil {
-                        statusMessage = lastMsg
-                        dismiss()
                     }
                 }
             }

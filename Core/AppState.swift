@@ -37,6 +37,12 @@ final class AppState: ObservableObject {
     @Published var downloads = DownloadManager()
     @Published var lastImportMessage: String?
 
+    // Estado da Splash de abertura (1) e do HUD de carregamento (2)
+    @Published var isBootstrapping: Bool = true
+    @Published var bootProgress: Double = 0.22
+    @Published var bootStatusText: String = L.tr("loading.boot.certs")
+    @Published var activeHUDTitle: String? = nil
+
     let sourceService = SourceService()
     let certificateService = CertificateService()
     let installService: InstallService = OTAInstallService()
@@ -77,8 +83,12 @@ final class AppState: ObservableObject {
     // MARK: - Ciclo de vida
 
     func bootstrap() async {
+        guard isBootstrapping else { return }
         Paths.ensure()
         _ = KeychainHelper.deviceID // garante o UUID fixo do aparelho no Keychain
+
+        bootProgress = 0.28
+        bootStatusText = L.tr("loading.boot.certs")
 
         apps = await Store.shared.load([AppItem].self, from: "apps")
         certificates = await Store.shared.load([Certificate].self, from: "certificates")
@@ -89,6 +99,19 @@ final class AppState: ObservableObject {
         // Atualiza status de validade dos certificados carregados
         for i in certificates.indices {
             certificates[i].status = certificateService.status(expiresAt: certificates[i].expiresAt)
+        }
+
+        try? await Task.sleep(nanoseconds: 350_000_000)
+        bootProgress = 0.72
+        bootStatusText = L.tr("loading.boot.sources")
+
+        try? await Task.sleep(nanoseconds: 350_000_000)
+        bootProgress = 1.0
+        bootStatusText = L.tr("loading.boot.ready")
+
+        try? await Task.sleep(nanoseconds: 220_000_000)
+        withAnimation(.easeInOut(duration: 0.35)) {
+            isBootstrapping = false
         }
 
         // Atualiza todas as fontes cadastradas em segundo plano
@@ -114,7 +137,9 @@ final class AppState: ObservableObject {
 
     func handle(url: URL) {
         if url.isFileURL {
-            _ = try? importResource(url: url)
+            Task {
+                _ = try? await importResourcesWithHUD(urls: [url])
+            }
             return
         }
         guard url.scheme == "xsign",
@@ -175,6 +200,37 @@ final class AppState: ObservableObject {
     }
 
     // MARK: - Importador Universal de Recursos (.ipa, .zip, .p12, .mobileprovision, .deb, .dylib, .json)
+
+    @discardableResult
+    func importResourcesWithHUD(urls: [URL]) async throws -> String? {
+        guard !urls.isEmpty else { return nil }
+        let firstExt = urls.first?.pathExtension.lowercased() ?? ""
+        let hudLabel: String
+        switch firstExt {
+        case "ipa":
+            hudLabel = L.tr("loading.hud.importingIPA")
+        case "zip", "p12", "pfx", "mobileprovision", "provisionprofile":
+            hudLabel = L.tr("loading.hud.importingCert")
+        default:
+            hudLabel = L.tr("loading.hud.importingResource")
+        }
+
+        withAnimation(.easeInOut(duration: 0.2)) {
+            activeHUDTitle = hudLabel
+        }
+        defer {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                activeHUDTitle = nil
+            }
+        }
+
+        try? await Task.sleep(nanoseconds: 450_000_000)
+        var lastMsg: String?
+        for u in urls {
+            lastMsg = try importResource(url: u)
+        }
+        return lastMsg
+    }
 
     @discardableResult
     func importResource(url: URL) throws -> String {

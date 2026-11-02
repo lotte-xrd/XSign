@@ -171,19 +171,30 @@ struct ImportCertificateView: View {
 
     private func importCert() {
         guard let p12 = p12Data, let prov = profileData else { return }
-        do {
-            let cert = try app.certificateService.saveCertificate(
-                p12Data: p12,
-                profileData: prov,
-                password: password,
-                nickname: nickname,
-                makeActive: app.certificates.isEmpty
-            )
-            app.certificates.append(cert)
-            app.persist()
-            dismiss()
-        } catch {
-            errorMessage = error.localizedDescription
+        Task {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                app.activeHUDTitle = L.tr("loading.hud.importingCert")
+            }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            defer {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    app.activeHUDTitle = nil
+                }
+            }
+            do {
+                let cert = try app.certificateService.saveCertificate(
+                    p12Data: p12,
+                    profileData: prov,
+                    password: password,
+                    nickname: nickname,
+                    makeActive: app.certificates.isEmpty
+                )
+                app.certificates.append(cert)
+                app.persist()
+                dismiss()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 }
