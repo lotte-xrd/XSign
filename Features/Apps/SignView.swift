@@ -53,7 +53,7 @@ struct SignView: View {
                             Text(name).font(.subheadline.weight(.semibold))
                             Text(bundleID).font(.caption2.monospaced()).foregroundStyle(.secondary)
                             if app.downloadURL != nil {
-                                Text("Modo B · Download direto no servidor")
+                                Text(L.tr("sign.directDownload"))
                                     .font(.caption2)
                                     .foregroundStyle(Color.moss)
                             }

@@ -213,3 +213,24 @@
 "cert.error.password" = "Wrong password for the .p12.";
 "cert.error.mismatch" = "The certificate doesn't match the profile.";
 "cert.error.profile" = "Couldn't read the profile.";
+
+/* Additional UI */
+"common.notice" = "Notice";
+"apps.importIPA" = "Import .ipa";
+"apps.noCertBanner" = "Import a certificate (.p12 + profile) to sign";
+"settings.community" = "Community & Links";
+"settings.website" = "XSign Website";
+"settings.discord" = "Discord";
+"settings.telegram" = "Telegram";
+"settings.instagram" = "Instagram";
+"settings.credits" = "Credits";
+"settings.headDeveloper" = "Head Developer";
+"settings.serverSection" = "Signing Server (zsign + OTA)";
+"settings.deviceQueueID" = "Device Queue ID";
+"importcert.zipTitle" = "Import .zip bundle";
+"importcert.zipSubtitle" = "Archive with .p12 + .mobileprovision";
+"sign.directDownload" = "Direct server download";
+"store.xsign.subtitle" = "Official .ipa signer and OTA installer";
+"store.xsign.notes" = "Official build of XSign by Lotte (Exploiting iOS).";
+"import.error.emptyClipboard" = "Clipboard is empty.";
+"import.error.invalidURL" = "Invalid URL.";

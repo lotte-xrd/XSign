@@ -26,87 +26,6 @@ struct AppsView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Card principal bem visível para importar .IPA
-                VStack(spacing: 10) {
-                    Button {
-                        showIPAImporter = true
-                    } label: {
-                        HStack(spacing: 14) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(Color.graphite)
-                                    .frame(width: 46, height: 46)
-                                Image(systemName: "plus.app.fill")
-                                    .font(.title3.weight(.semibold))
-                                    .foregroundStyle(Color.onGraphite)
-                            }
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Importar arquivo .IPA")
-                                    .font(.subheadline.weight(.bold))
-                                    .foregroundStyle(Color.graphite)
-                                Text("Toque aqui para escolher um .ipa do seu iPhone")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer(minLength: 6)
-                            Text("IMPORTAR")
-                                .font(.caption2.weight(.bold))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 7)
-                                .foregroundStyle(Color.onGraphite)
-                                .background(Color.graphite, in: Capsule())
-                        }
-                        .padding(12)
-                        .background(Color.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color.hairline, lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    // Status rápido do certificado
-                    if let cert = app.currentCertificate {
-                        HStack(spacing: 8) {
-                            Image(systemName: "checkmark.seal.fill")
-                                .font(.caption)
-                                .foregroundStyle(Color.moss)
-                            Text("Certificado ativo: \(cert.nickname)")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                            Spacer()
-                            StatusBadge(status: cert.status)
-                        }
-                        .padding(.horizontal, 4)
-                    } else {
-                        Button {
-                            showCertImporter = true
-                        } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "exclamationmark.shield.fill")
-                                    .foregroundStyle(Color.ochre)
-                                Text("Importe seu certificado (.p12 + .mobileprovision) para assinar")
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(Color.graphite)
-                                    .lineLimit(1)
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.caption2.weight(.bold))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 9)
-                            .background(Color.ochre.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, Spacing.screen)
-                .padding(.top, 8)
-                .padding(.bottom, 4)
-
                 Picker("", selection: $segment) {
                     Text(L.tr("apps.unsigned", app.apps.filter { $0.state == .unsigned }.count)).tag(AppState2.unsigned)
                     Text(L.tr("apps.signed", app.apps.filter { $0.state == .signed }.count)).tag(AppState2.signed)
@@ -115,23 +34,12 @@ struct AppsView: View {
                 .padding(.horizontal, Spacing.screen).padding(.vertical, 8)
 
                 if list.isEmpty {
-                    VStack(spacing: 16) {
-                        EmptyStateView(
-                            title: segment == .unsigned ? "Nenhum .IPA importado ainda" : L.tr("apps.empty.title"),
-                            message: segment == .unsigned
-                                ? "Toque no botão abaixo ou no card acima para escolher qualquer arquivo .IPA salvo no seu iPhone e assinar em segundos."
-                                : "Quando você assinar um app, ele aparecerá aqui pronto para instalar."
-                        )
+                    VStack(spacing: 14) {
+                        EmptyStateView(title: L.tr("apps.empty.title"), message: L.tr("apps.empty.message"))
                         if segment == .unsigned {
-                            VStack(spacing: 10) {
-                                PrimaryButton(title: "Escolher arquivo .IPA no iPhone") {
-                                    showIPAImporter = true
-                                }
-                                SecondaryButton(title: "Explorar a Loja de Apps", systemImage: "square.grid.2x2") {
-                                    app.selectedTab = .store
-                                }
+                            PillButton(title: L.tr("apps.importIPA"), filled: true) {
+                                showIPAImporter = true
                             }
-                            .padding(.horizontal, 32)
                         }
                     }
                     Spacer()
@@ -161,7 +69,7 @@ struct AppsView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showIPAImporter = true } label: {
-                        Label("Importar .IPA", systemImage: "plus.circle.fill")
+                        Image(systemName: "plus")
                     }
                 }
             }
@@ -191,7 +99,7 @@ struct AppsView: View {
                     }
                 }
             }
-            .alert("Aviso", isPresented: .init(
+            .alert(L.tr("common.notice"), isPresented: .init(
                 get: { errorAlertMessage != nil },
                 set: { if !$0 { errorAlertMessage = nil } }
             )) {

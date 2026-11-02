@@ -213,3 +213,24 @@
 "cert.error.password" = "Contraseña incorrecta del .p12.";
 "cert.error.mismatch" = "El certificado no coincide con el perfil.";
 "cert.error.profile" = "No se pudo leer el perfil.";
+
+/* UI adicional */
+"common.notice" = "Aviso";
+"apps.importIPA" = "Importar .ipa";
+"apps.noCertBanner" = "Importa un certificado (.p12 + perfil) para firmar";
+"settings.community" = "Comunidad y enlaces";
+"settings.website" = "Sitio web de XSign";
+"settings.discord" = "Discord";
+"settings.telegram" = "Telegram";
+"settings.instagram" = "Instagram";
+"settings.credits" = "Créditos";
+"settings.headDeveloper" = "Head Developer";
+"settings.serverSection" = "Servidor de firma (zsign + OTA)";
+"settings.deviceQueueID" = "ID de cola del dispositivo";
+"importcert.zipTitle" = "Importar paquete .zip";
+"importcert.zipSubtitle" = "Paquete con .p12 + .mobileprovision";
+"sign.directDownload" = "Descarga directa en el servidor";
+"store.xsign.subtitle" = "Firmador .ipa e instalador OTA oficial";
+"store.xsign.notes" = "Versión oficial de XSign por Lotte (Exploiting iOS).";
+"import.error.emptyClipboard" = "El portapapeles está vacío.";
+"import.error.invalidURL" = "URL no válida.";

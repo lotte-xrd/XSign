@@ -6,25 +6,27 @@ import Combine
 final class AppState: ObservableObject {
     @Published var selectedTab: AppTab = .apps
 
-    static let builtInXSignApp = SourceApp(
-        name: "XSign",
-        bundleID: "com.xsign.app",
-        developer: "Lotte",
-        subtitle: "Assinador .IPA e instalador OTA oficial do Exploiting iOS",
-        category: "Utilities",
-        iconURL: nil,
-        sourceID: nil,
-        sourceName: "XSign Official",
-        versions: [
-            AppVersion(
-                version: "1.0.0",
-                downloadURL: URL(string: "https://github.com/lotte-xrd/XSign/releases/download/latest/XSign-unsigned.ipa")!,
-                size: nil,
-                date: Date(),
-                notes: "Versão oficial do XSign desenvolvida por Lotte (Exploiting iOS). Permite assinar e instalar qualquer .IPA direto no seu iPhone."
-            )
-        ]
-    )
+    static var builtInXSignApp: SourceApp {
+        SourceApp(
+            name: "XSign",
+            bundleID: "com.xsign.app",
+            developer: "Lotte",
+            subtitle: L.tr("store.xsign.subtitle"),
+            category: "Utilities",
+            iconURL: nil,
+            sourceID: nil,
+            sourceName: "XSign Official",
+            versions: [
+                AppVersion(
+                    version: "1.0.0",
+                    downloadURL: URL(string: "https://github.com/lotte-xrd/XSign/releases/download/latest/XSign-unsigned.ipa")!,
+                    size: nil,
+                    date: Date(),
+                    notes: L.tr("store.xsign.notes")
+                )
+            ]
+        )
+    }
 
     @Published var sources: [Source] = []
     @Published var sourceApps: [SourceApp] = [AppState.builtInXSignApp]
@@ -41,6 +43,7 @@ final class AppState: ObservableObject {
     let signingService: SigningService = RemoteSigningService()
 
     private var downloadsCancellable: AnyCancellable?
+    private var languageCancellable: AnyCancellable?
 
     var currentCertificate: Certificate? {
         certificates.first(where: { $0.inUse }) ?? certificates.first
@@ -49,6 +52,11 @@ final class AppState: ObservableObject {
     init() {
         downloadsCancellable = downloads.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
+        }
+        languageCancellable = LocalizationManager.shared.$code.sink { [weak self] _ in
+            Task { @MainActor in
+                self?.ensureBuiltInXSign()
+            }
         }
         downloads.onDownloadFinished = { [weak self] task, fileURL in
             guard let self else { return }

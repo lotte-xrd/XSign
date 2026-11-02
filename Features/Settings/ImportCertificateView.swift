@@ -34,10 +34,10 @@ struct ImportCertificateView: View {
                                 .background(Color.fill, in: RoundedRectangle(cornerRadius: 7))
                                 .foregroundStyle(Color.graphite)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Importar pacote .zip")
+                                Text(L.tr("importcert.zipTitle"))
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(Color.graphite)
-                                Text("Pacote com .p12 + .mobileprovision (ex: Exploiting iOS)")
+                                Text(L.tr("importcert.zipSubtitle"))
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
@@ -129,7 +129,7 @@ struct ImportCertificateView: View {
         }
 
         guard let data = try? Data(contentsOf: url), !data.isEmpty else {
-            errorMessage = "Não foi possível ler o arquivo \(url.lastPathComponent)."
+            errorMessage = L.tr("cert.error.profile")
             return
         }
 

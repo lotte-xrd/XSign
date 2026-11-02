@@ -47,15 +47,12 @@ struct SettingsView: View {
                     } label: { Label(L.tr("settings.appIcon"), systemImage: "app.dashed") }
                 }
 
-                Section("Comunidade & Links Oficiais") {
+                Section(L.tr("settings.community")) {
                     Link(destination: URL(string: "https://exploiting-ios.online")!) {
                         HStack {
-                            Label("XSign Website", systemImage: "safari.fill")
+                            Label(L.tr("settings.website"), systemImage: "globe")
                                 .foregroundStyle(Color.graphite)
                             Spacer()
-                            Text("exploiting-ios.online")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                             Image(systemName: "arrow.up.right")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
@@ -63,12 +60,9 @@ struct SettingsView: View {
                     }
                     Link(destination: URL(string: "https://discord.gg/UzExbYa2MZ")!) {
                         HStack {
-                            Label("Discord", systemImage: "bubble.left.and.bubble.right.fill")
+                            Label(L.tr("settings.discord"), systemImage: "bubble.left.and.bubble.right")
                                 .foregroundStyle(Color.graphite)
                             Spacer()
-                            Text("Entrar no servidor")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                             Image(systemName: "arrow.up.right")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
@@ -76,12 +70,9 @@ struct SettingsView: View {
                     }
                     Link(destination: URL(string: "https://t.me/+NJgHs1Dx5ahmMDRk")!) {
                         HStack {
-                            Label("Telegram", systemImage: "paperplane.fill")
+                            Label(L.tr("settings.telegram"), systemImage: "paperplane")
                                 .foregroundStyle(Color.graphite)
                             Spacer()
-                            Text("Canal oficial")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                             Image(systemName: "arrow.up.right")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
@@ -89,12 +80,9 @@ struct SettingsView: View {
                     }
                     Link(destination: URL(string: "https://instagram.com/exploiting_ios")!) {
                         HStack {
-                            Label("Instagram", systemImage: "camera.fill")
+                            Label(L.tr("settings.instagram"), systemImage: "camera")
                                 .foregroundStyle(Color.graphite)
                             Spacer()
-                            Text("@exploiting_ios")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                             Image(systemName: "arrow.up.right")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
@@ -102,7 +90,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Créditos") {
+                Section(L.tr("settings.credits")) {
                     DeveloperCreditCard()
                 }
 
@@ -129,14 +117,14 @@ struct SigningServerSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Servidor de Assinatura (zsign + OTA)") {
+            Section(L.tr("settings.serverSection")) {
                 TextField("https://exploiting-ios.online", text: $app.settings.serverURL)
                     .font(.callout.monospaced())
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
             }
             Section {
-                LabeledContent("Device Queue ID") {
+                LabeledContent(L.tr("settings.deviceQueueID")) {
                     Text("\(KeychainHelper.deviceID.prefix(12))…")
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
@@ -176,47 +164,33 @@ struct CertificateCard: View {
 
 struct DeveloperCreditCard: View {
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10) {
             Image("LotteAvatar")
                 .resizable()
                 .scaledToFill()
-                .frame(width: 56, height: 56)
+                .frame(width: 30, height: 30)
                 .clipShape(Circle())
-                .overlay(
-                    Circle().stroke(Color.graphite.opacity(0.25), lineWidth: 1.5)
-                )
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text("Lotte")
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(Color.graphite)
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.caption)
-                        .foregroundStyle(Color.moss)
-                }
-                Text("Head Developer · XSign")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
-                Text("Exploiting iOS (exploiting-ios.online)")
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.secondary)
-            }
+            Text("Lotte")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color.graphite)
             Spacer()
+            Text(L.tr("settings.headDeveloper"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 4)
     }
 }
 
 struct AboutView: View {
     var body: some View {
         List {
-            Section("Head Developer") {
+            Section(L.tr("settings.credits")) {
                 DeveloperCreditCard()
             }
             Section { Text(L.tr("about.blurb")).font(.subheadline) }
             Section(L.tr("about.openSource")) {
-                LabeledContent("zsign 1.1.3", value: "Assinatura C++/OpenSSL")
-                LabeledContent("ZIPFoundation", value: "Leitura e pacotes .ipa")
+                LabeledContent("zsign 1.1.3", value: "C++ / OpenSSL")
+                LabeledContent("ZIPFoundation", value: "MIT")
                 LabeledContent("Exploiting iOS", value: "OTA itms-services")
             }
         }

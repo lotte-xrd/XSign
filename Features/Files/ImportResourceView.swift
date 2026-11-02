@@ -87,7 +87,7 @@ struct ImportResourceView: View {
     private func importFromClipboard() {
         guard let str = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines),
               !str.isEmpty else {
-            errorMessage = "A área de transferência está vazia."
+            errorMessage = L.tr("import.error.emptyClipboard")
             return
         }
         handleURLString(str)
@@ -97,7 +97,7 @@ struct ImportResourceView: View {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed),
               url.scheme == "http" || url.scheme == "https" else {
-            errorMessage = "URL inválida."
+            errorMessage = L.tr("import.error.invalidURL")
             return
         }
         errorMessage = nil
