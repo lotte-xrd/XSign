@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import Combine
 
 /// Estado central do app: dados reais persistidos, serviços e preferências.
@@ -50,6 +51,7 @@ final class AppState: ObservableObject {
 
     private var downloadsCancellable: AnyCancellable?
     private var languageCancellable: AnyCancellable?
+    private var heartbeatTask: Task<Void, Never>?
 
     var currentCertificate: Certificate? {
         certificates.first(where: { $0.inUse }) ?? certificates.first
@@ -114,10 +116,46 @@ final class AppState: ObservableObject {
             isBootstrapping = false
         }
 
+        startHeartbeatLoop()
+
         // Atualiza todas as fontes cadastradas em segundo plano
         if !sources.isEmpty {
             await refreshAllSources()
         }
+    }
+
+    // MARK: - Heartbeat de instalações ativas (/count no servidor)
+
+    func startHeartbeatLoop() {
+        heartbeatTask?.cancel()
+        heartbeatTask = Task {
+            while !Task.isCancelled {
+                await sendHeartbeat(state: "active")
+                try? await Task.sleep(nanoseconds: 60_000_000_000) // a cada 60s
+            }
+        }
+    }
+
+    func sendHeartbeat(state: String) async {
+        let base = settings.serverURL.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "/+$", with: "", options: .regularExpression)
+        guard let url = URL(string: "\(base)/api/xsign/heartbeat") else { return }
+
+        var req = URLRequest(url: url, timeoutInterval: 10)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("XSign/1.0 (iOS)", forHTTPHeaderField: "User-Agent")
+        req.setValue(KeychainHelper.deviceID, forHTTPHeaderField: "X-XSign-Device")
+
+        let payload: [String: String] = [
+            "deviceId": KeychainHelper.deviceID,
+            "model": UIDevice.current.model,
+            "iosVersion": UIDevice.current.systemVersion,
+            "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0",
+            "locale": Locale.current.identifier,
+            "state": state
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        _ = try? await URLSession.shared.data(for: req)
     }
 
     func persist() {

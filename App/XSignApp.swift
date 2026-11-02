@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct XSignApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var appState = AppState()
     @StateObject private var language = LocalizationManager.shared
 
@@ -34,6 +35,16 @@ struct XSignApp: App {
             .id(language.code) // recria a árvore ao trocar de idioma
             .onOpenURL { appState.handle(url: $0) }
             .task { await appState.bootstrap() }
+            .onChange(of: scenePhase) { newPhase in
+                switch newPhase {
+                case .active:
+                    appState.startHeartbeatLoop()
+                case .background:
+                    Task { await appState.sendHeartbeat(state: "background") }
+                default:
+                    break
+                }
+            }
         }
     }
 }
