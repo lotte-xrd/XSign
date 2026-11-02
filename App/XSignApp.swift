@@ -35,6 +35,39 @@ struct XSignApp: App {
             .id(language.code) // recria a árvore ao trocar de idioma
             .onOpenURL { appState.handle(url: $0) }
             .task { await appState.bootstrap() }
+            .alert(
+                appState.availableUpdate.map { L.tr("update.available.title", $0.version) } ?? "",
+                isPresented: Binding(
+                    get: { appState.availableUpdate != nil },
+                    set: { if !$0 { appState.availableUpdate = nil } }
+                )
+            ) {
+                if let update = appState.availableUpdate {
+                    Button(L.tr("update.now")) {
+                        appState.triggerSelfUpdate(update)
+                    }
+                    Button(L.tr("update.later"), role: .cancel) {
+                        appState.availableUpdate = nil
+                    }
+                }
+            } message: {
+                Text(appState.availableUpdate?.notes ?? L.tr("update.available.defaultNotes"))
+            }
+            .fullScreenCover(item: $appState.selfUpdateTarget) { target in
+                if let cert = appState.currentCertificate {
+                    SignProgressView(
+                        app: target,
+                        certificate: cert,
+                        options: SignOptions(name: target.name, bundleID: target.bundleID, version: target.version)
+                    )
+                    .environmentObject(appState)
+                    .environmentObject(language)
+                } else {
+                    SignView(app: target)
+                        .environmentObject(appState)
+                        .environmentObject(language)
+                }
+            }
             .onChange(of: scenePhase) { newPhase in
                 switch newPhase {
                 case .active:

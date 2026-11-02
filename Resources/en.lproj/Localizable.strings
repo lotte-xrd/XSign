@@ -243,3 +243,12 @@
 "loading.hud.importingCert" = "Importing certificate…";
 "loading.hud.importingResource" = "Importing resource…";
 "loading.hud.refreshingSources" = "Refreshing sources…";
+
+/* Auto-Update */
+"settings.checkUpdates" = "Check for updates";
+"update.available.title" = "XSign %@ is available";
+"update.available.defaultNotes" = "A new version of XSign is ready to install. Your certificates, sources and apps will be preserved.";
+"update.now" = "Update now";
+"update.later" = "Later";
+"update.upToDate" = "XSign is up to date (%@).";
+"loading.hud.checkingUpdate" = "Checking for updates…";

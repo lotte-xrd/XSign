@@ -2,6 +2,16 @@ import SwiftUI
 import UIKit
 import Combine
 
+/// Informações de nova versão retornadas pelo servidor ou GitHub.
+struct AppUpdateInfo: Identifiable, Codable, Equatable {
+    var id: String { "\(version)-\(build ?? "1")" }
+    let version: String
+    let build: String?
+    let ipaUrl: String?
+    let installUrl: String?
+    let notes: String?
+}
+
 /// Estado central do app: dados reais persistidos, serviços e preferências.
 @MainActor
 final class AppState: ObservableObject {
@@ -38,11 +48,13 @@ final class AppState: ObservableObject {
     @Published var downloads = DownloadManager()
     @Published var lastImportMessage: String?
 
-    // Estado da Splash de abertura (1) e do HUD de carregamento (2)
+    // Estado da Splash de abertura (1), HUD de carregamento (2) e Auto-Update OTA
     @Published var isBootstrapping: Bool = true
     @Published var bootProgress: Double = 0.22
     @Published var bootStatusText: String = L.tr("loading.boot.certs")
     @Published var activeHUDTitle: String? = nil
+    @Published var availableUpdate: AppUpdateInfo? = nil
+    @Published var selfUpdateTarget: AppItem? = nil
 
     let sourceService = SourceService()
     let certificateService = CertificateService()
@@ -166,11 +178,126 @@ final class AppState: ObservableObject {
         }
 
         startHeartbeatLoop()
+        Task { _ = await checkForAppUpdate(manual: false) }
 
         // Atualiza todas as fontes cadastradas em segundo plano
         if !sources.isEmpty {
             await refreshAllSources()
         }
+    }
+
+    // MARK: - Auto-Update OTA (Sem App Store)
+
+    var currentAppVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+    }
+
+    var currentAppBuild: String {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+    }
+
+    @discardableResult
+    func checkForAppUpdate(manual: Bool = false) async -> Bool {
+        if manual {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                activeHUDTitle = L.tr("loading.hud.checkingUpdate")
+            }
+        }
+        defer {
+            if manual {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    activeHUDTitle = nil
+                }
+            }
+        }
+
+        let base = settings.serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/+$", with: "", options: .regularExpression)
+        let ts = Int(Date().timeIntervalSince1970)
+        var candidates: [URL] = []
+        if let serverVersionURL = URL(string: "\(base)/api/xsign/version?t=\(ts)") {
+            candidates.append(serverVersionURL)
+        }
+        if let ghVersionURL = URL(string: "https://raw.githubusercontent.com/lotte-xrd/XSign/main/version.json?t=\(ts)") {
+            candidates.append(ghVersionURL)
+        }
+
+        for url in candidates {
+            var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 10)
+            req.setValue("XSign/1.0 (iOS)", forHTTPHeaderField: "User-Agent")
+            req.setValue(KeychainHelper.deviceID, forHTTPHeaderField: "X-XSign-Device")
+            if let cert = currentCertificate {
+                req.setValue(cert.teamID, forHTTPHeaderField: "X-XSign-TeamID")
+                if let appID = cert.appID {
+                    req.setValue(appID, forHTTPHeaderField: "X-XSign-AppID")
+                }
+            }
+            guard let (data, resp) = try? await URLSession.shared.data(for: req),
+                  let http = resp as? HTTPURLResponse,
+                  (200...299).contains(http.statusCode),
+                  let info = try? JSONDecoder().decode(AppUpdateInfo.self, from: data) else {
+                continue
+            }
+
+            if Self.isNewerVersion(
+                remoteVersion: info.version,
+                remoteBuild: info.build,
+                localVersion: currentAppVersion,
+                localBuild: currentAppBuild
+            ) {
+                availableUpdate = info
+                return true
+            }
+            return false
+        }
+        return false
+    }
+
+    func triggerSelfUpdate(_ info: AppUpdateInfo) {
+        availableUpdate = nil
+        // 1) Se o servidor já devolveu um link OTA itms-services:// pré-assinado com o mesmo certificado
+        if let directOTA = info.installUrl, !directOTA.isEmpty {
+            Task {
+                try? await installService.openInstallURL(directOTA)
+            }
+            return
+        }
+
+        // 2) Assina o novo .ipa automaticamente no servidor usando o certificado ativo do usuário e instala via OTA por cima!
+        let ipaURLString = info.ipaUrl ?? "https://github.com/lotte-xrd/XSign/releases/download/latest/XSign-unsigned.ipa"
+        guard let remoteURL = URL(string: ipaURLString) else { return }
+
+        let target = AppItem(
+            name: "XSign",
+            bundleID: Bundle.main.bundleIdentifier ?? "com.xsign.app",
+            version: info.version,
+            iconPath: nil,
+            iconURL: nil,
+            filePath: "",
+            downloadURL: remoteURL,
+            size: 0,
+            state: .unsigned,
+            certificateID: currentCertificate?.id,
+            certificateName: currentCertificate?.nickname,
+            origin: "XSign Auto-Update"
+        )
+        selfUpdateTarget = target
+    }
+
+    private static func isNewerVersion(remoteVersion: String, remoteBuild: String?, localVersion: String, localBuild: String) -> Bool {
+        let rParts = remoteVersion.split(separator: ".").compactMap { Int($0) }
+        let lParts = localVersion.split(separator: ".").compactMap { Int($0) }
+        let count = max(rParts.count, lParts.count)
+        for i in 0..<count {
+            let r = i < rParts.count ? rParts[i] : 0
+            let l = i < lParts.count ? lParts[i] : 0
+            if r > l { return true }
+            if r < l { return false }
+        }
+        if let rb = remoteBuild.flatMap({ Int($0) }), let lb = Int(localBuild), rb > lb {
+            return true
+        }
+        return false
     }
 
     // MARK: - Heartbeat de instalações ativas (/count no servidor)

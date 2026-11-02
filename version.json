@@ -1,0 +1,6 @@
+{
+  "version": "1.0.0",
+  "build": "1",
+  "ipaUrl": "https://github.com/lotte-xrd/XSign/releases/download/latest/XSign-unsigned.ipa",
+  "notes": "Official XSign release by Lotte (Exploiting iOS)."
+}

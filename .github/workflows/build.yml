@@ -67,4 +67,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release view latest >/dev/null 2>&1 || gh release create latest --title "XSign Latest" --notes "Build oficial do XSign (Exploiting iOS)"
-          gh release upload latest "$RUNNER_TEMP/XSign-unsigned.ipa" --clobber
+          gh release upload latest "$RUNNER_TEMP/XSign-unsigned.ipa" version.json --clobber

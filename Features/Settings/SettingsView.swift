@@ -4,6 +4,7 @@ import UIKit
 struct SettingsView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var language: LocalizationManager
+    @State private var showUpToDateAlert = false
 
     var body: some View {
         NavigationStack {
@@ -95,12 +96,28 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    LabeledContent(L.tr("settings.version"), value: "1.0.0 (1)")
+                    LabeledContent(L.tr("settings.version"), value: "\(app.currentAppVersion) (\(app.currentAppBuild))")
+                    Button {
+                        Task {
+                            let found = await app.checkForAppUpdate(manual: true)
+                            if !found {
+                                showUpToDateAlert = true
+                            }
+                        }
+                    } label: {
+                        Label(L.tr("settings.checkUpdates"), systemImage: "arrow.triangle.2.circlepath")
+                            .foregroundStyle(Color.graphite)
+                    }
                     NavigationLink(L.tr("settings.about")) { AboutView() }
                 }
             }
             .navigationTitle(L.tr("tab.settings"))
             .navigationBarTitleDisplayMode(.inline)
+            .alert(L.tr("common.notice"), isPresented: $showUpToDateAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(L.tr("update.upToDate", app.currentAppVersion))
+            }
             .onChange(of: app.settings.appearance) { _ in app.settings.save() }
             .onChange(of: app.settings.installAfterSign) { _ in app.settings.save() }
             .onChange(of: app.settings.deleteOriginalAfterSign) { _ in app.settings.save() }
