@@ -1,0 +1,107 @@
+name: Testes do injetor de tweaks
+
+# Compila o injetor (MachO + .deb + TweakInjector) como ferramenta de linha de
+# comando no macOS, injeta tweaks reais (.deb xz, .deb gzip e .dylib) num app de
+# teste e executa o resultado para conferir que o dyld carrega o tweak.
+
+on:
+  push:
+    branches: [ '**' ]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compilar a ferramenta de teste
+        run: |
+          swiftc -O \
+            Core/Services/MachO.swift \
+            Core/Services/DebExtractor.swift \
+            Core/Services/TweakInjector.swift \
+            Tests/TweakSmoke/Stubs.swift \
+            Tests/TweakSmoke/main.swift \
+            -o "$RUNNER_TEMP/tweaksmoke"
+
+      - name: Montar app, Substrate falso e tweaks
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/w"; mkdir -p "$W"; cd "$W"
+
+          # "Substrate" falso para macOS, com o install name do Substrate de jailbreak
+          printf 'int MSHookFunction(void){return 42;}\n' > sub.c
+          clang -dynamiclib sub.c -install_name /Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate -o CydiaSubstrate
+          # O injetor procura o ElleKit embutido ao lado do executável (Bundle.main)
+          cp CydiaSubstrate "$RUNNER_TEMP/ellekit-substrate.bin"
+
+          # Tweak que depende do Substrate
+          cat > tweak.c <<'C'
+          #include <stdio.h>
+          extern int MSHookFunction(void);
+          __attribute__((constructor)) static void init(void) { printf("TWEAK_XZ_LOADED %d\n", MSHookFunction()); fflush(stdout); }
+          C
+          clang -dynamiclib tweak.c CydiaSubstrate -install_name /Library/MobileSubstrate/DynamicLibraries/TweakXZ.dylib -o TweakXZ.dylib
+
+          # Tweak simples (sem Substrate), empacotado com gzip
+          cat > tweak2.c <<'C'
+          #include <stdio.h>
+          __attribute__((constructor)) static void init(void) { printf("TWEAK_GZ_LOADED\n"); fflush(stdout); }
+          C
+          clang -dynamiclib tweak2.c -install_name /var/jb/usr/lib/TweakInject/TweakGZ.dylib -o TweakGZ.dylib
+
+          # Dylib solta
+          cat > tweak3.c <<'C'
+          #include <stdio.h>
+          __attribute__((constructor)) static void init(void) { printf("TWEAK_DYLIB_LOADED\n"); fflush(stdout); }
+          C
+          clang -dynamiclib tweak3.c -install_name @rpath/Loose.dylib -o Loose.dylib
+
+          # .deb com data.tar.xz (layout rootful)
+          mkdir -p debxz/root/Library/MobileSubstrate/DynamicLibraries
+          cp TweakXZ.dylib debxz/root/Library/MobileSubstrate/DynamicLibraries/
+          printf '{ Filter = { Bundles = ( "com.apple.UIKit" ); }; }' > debxz/root/Library/MobileSubstrate/DynamicLibraries/TweakXZ.plist
+          (cd debxz/root && tar -cJf ../data.tar.xz .)
+          (cd debxz && echo "2.0" > debian-binary && printf 'Package: test.xz\n' > control && tar -czf control.tar.gz control && ar rc ../tweak-xz.deb debian-binary control.tar.gz data.tar.xz)
+
+          # .deb com data.tar.gz (layout rootless)
+          mkdir -p debgz/root/var/jb/usr/lib/TweakInject
+          cp TweakGZ.dylib debgz/root/var/jb/usr/lib/TweakInject/
+          (cd debgz/root && tar -czf ../data.tar.gz .)
+          (cd debgz && echo "2.0" > debian-binary && printf 'Package: test.gz\n' > control && tar -czf control.tar.gz control && ar rc ../tweak-gz.deb debian-binary control.tar.gz data.tar.gz)
+
+          # App de teste
+          printf '#include <stdio.h>\nint main(void){ printf("APP_RUNNING\\n"); return 0; }\n' > main.c
+          mkdir -p Fake.dir
+          clang main.c -Wl,-headerpad,0x4000 -o Fake.dir/FakeApp
+          /usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string FakeApp" Fake.dir/Info.plist
+          ls -la
+
+      - name: Injetar e executar
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/w"; cd "$W"
+          "$RUNNER_TEMP/tweaksmoke" "$W/Fake.dir" "$W/tweak-xz.deb" "$W/tweak-gz.deb" "$W/Loose.dylib"
+
+          echo "--- load commands do app"
+          otool -L Fake.dir/FakeApp
+          otool -l Fake.dir/FakeApp | grep -A2 LC_RPATH
+          echo "--- dependências do tweak"
+          otool -L Fake.dir/Frameworks/TweakXZ.dylib
+          otool -L Fake.dir/Frameworks/CydiaSubstrate.framework/CydiaSubstrate
+          find Fake.dir -print
+
+          # Reassinar ad-hoc (no macOS arm64 tudo precisa de assinatura) e executar
+          for f in Fake.dir/Frameworks/*.dylib Fake.dir/Frameworks/CydiaSubstrate.framework/CydiaSubstrate Fake.dir/FakeApp; do
+            codesign -f -s - "$f"
+          done
+          OUT=$(./Fake.dir/FakeApp)
+          echo "$OUT"
+
+          echo "$OUT" | grep -q "TWEAK_XZ_LOADED 42"
+          echo "$OUT" | grep -q "TWEAK_GZ_LOADED"
+          echo "$OUT" | grep -q "TWEAK_DYLIB_LOADED"
+          echo "$OUT" | grep -q "APP_RUNNING"
+          otool -L Fake.dir/Frameworks/TweakXZ.dylib | grep -q "@rpath/CydiaSubstrate.framework/CydiaSubstrate"
+          echo "OK: os três tweaks carregaram e o Substrate foi trocado pelo ElleKit embutido"

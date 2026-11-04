@@ -38,14 +38,22 @@ enum DebExtractor {
             let sizeText = String(decoding: header.subdata(in: 48..<58), as: UTF8.self)
                 .trimmingCharacters(in: .whitespaces)
             guard let size = Int(sizeText), size >= 0 else { break }
-            let start = position + 60
+            var start = position + 60
             guard start + size <= data.count else { break }
+            var memberSize = size
+            // Formato BSD (ar do macOS): "#1/<n>" e o nome vem nos primeiros n bytes.
+            if name.hasPrefix("#1/"), let nameLength = Int(name.dropFirst(3)), nameLength <= size {
+                name = String(decoding: data.subdata(in: start..<(start + nameLength)), as: UTF8.self)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\0"))
+                start += nameLength
+                memberSize -= nameLength
+            }
             if name.hasPrefix("data.tar") {
-                payload = data.subdata(in: start..<(start + size))
+                payload = data.subdata(in: start..<(start + memberSize))
                 payloadName = name
                 break
             }
-            position = start + size + (size % 2)
+            position = position + 60 + size + (size % 2)
         }
 
         guard let payload else { throw DebError.noPayload }
