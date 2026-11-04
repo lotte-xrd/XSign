@@ -29,7 +29,7 @@ final class AppState: ObservableObject {
             sourceName: "XSign Official",
             versions: [
                 AppVersion(
-                    version: "1.0.0",
+                    version: "1.1.0",
                     downloadURL: URL(string: "https://github.com/lotte-xrd/XSign/releases/download/latest/XSign-unsigned.ipa")!,
                     size: nil,
                     date: Date(),

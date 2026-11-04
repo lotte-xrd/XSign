@@ -1,6 +1,6 @@
 {
-  "version": "1.0.0",
-  "build": "1",
+  "version": "1.1.0",
+  "build": "2",
   "ipaUrl": "https://github.com/lotte-xrd/XSign/releases/download/latest/XSign-unsigned.ipa",
-  "notes": "Official XSign release by Lotte (Exploiting iOS)."
+  "notes": "XSign 1.1.0: tweaks de verdade (.dylib, .deb e .framework, com ElleKit), assinatura em lote, log da assinatura ao vivo, informações do app, entitlements do certificado, importar do ESign/KSign, gerenciador de arquivos e downloads em segundo plano com notificação."
 }
