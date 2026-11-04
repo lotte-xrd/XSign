@@ -17,7 +17,18 @@ struct AppUpdateInfo: Identifiable, Codable, Equatable {
 final class AppState: ObservableObject {
     @Published var selectedTab: AppTab = .apps
 
-    static var builtInXSignApp: SourceApp {
+    /// Origem do XSign que já vem pronto na lista de Apps.
+    static let officialOrigin = "XSign Official"
+
+    /// Versão (CFBundleShortVersionString) do XSign instalado.
+    static var bundleShortVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+    }
+
+    static var builtInXSignApp: SourceApp { builtInXSignApp(version: bundleShortVersion) }
+
+    /// XSign oficial da Loja; `version` é a do link "latest" quando já conhecida.
+    static func builtInXSignApp(version: String) -> SourceApp {
         SourceApp(
             name: "XSign",
             bundleID: "com.xsign.app",
@@ -29,7 +40,7 @@ final class AppState: ObservableObject {
             sourceName: "XSign Official",
             versions: [
                 AppVersion(
-                    version: "1.1.0",
+                    version: version,
                     downloadURL: URL(string: "https://github.com/lotte-xrd/XSign/releases/download/latest/XSign-unsigned.ipa")!,
                     size: nil,
                     date: Date(),
@@ -55,6 +66,12 @@ final class AppState: ObservableObject {
     @Published var activeHUDTitle: String? = nil
     @Published var availableUpdate: AppUpdateInfo? = nil
     @Published var selfUpdateTarget: AppItem? = nil
+
+    /// Versão publicada no link "latest" (vem da checagem de atualização).
+    private var latestRemoteVersion: String?
+
+    /// Versão que o XSign oficial baixa hoje: a do "latest" ou, sem rede, a instalada.
+    var latestXSignVersion: String { latestRemoteVersion ?? currentAppVersion }
 
     let sourceService = SourceService()
     let certificateService = CertificateService()
@@ -141,7 +158,7 @@ final class AppState: ObservableObject {
                 state: .unsigned,
                 certificateID: activeCert?.id,
                 certificateName: activeCert?.nickname,
-                origin: "XSign Official"
+                origin: Self.officialOrigin
             )
             if !apps.contains(where: { $0.name == "XSign" && $0.state == .unsigned }) {
                 apps.insert(ownUnsigned, at: 0)
@@ -160,12 +177,14 @@ final class AppState: ObservableObject {
                     certificateID: cert.id,
                     certificateName: cert.nickname,
                     signedAt: Date(),
-                    origin: "XSign Official"
+                    origin: Self.officialOrigin
                 )
                 apps.append(ownSigned)
             }
             persist()
         }
+        // O rótulo de versão foi gravado na primeira abertura; acerta para a versão atual.
+        refreshOfficialXSignEntries()
 
         try? await Task.sleep(nanoseconds: 350_000_000)
         bootProgress = 0.72
@@ -192,7 +211,7 @@ final class AppState: ObservableObject {
     // MARK: - Auto-Update OTA (Sem App Store)
 
     var currentAppVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+        Self.bundleShortVersion
     }
 
     var currentAppBuild: String {
@@ -240,6 +259,13 @@ final class AppState: ObservableObject {
                   (200...299).contains(http.statusCode),
                   let info = try? JSONDecoder().decode(AppUpdateInfo.self, from: data) else {
                 continue
+            }
+
+            let remoteVersion = info.version.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !remoteVersion.isEmpty, remoteVersion != latestRemoteVersion {
+                latestRemoteVersion = remoteVersion
+                ensureBuiltInXSign()
+                refreshOfficialXSignEntries()
             }
 
             if Self.isNewerVersion(
@@ -412,8 +438,31 @@ final class AppState: ObservableObject {
     }
 
     private func ensureBuiltInXSign() {
-        sourceApps.removeAll { $0.bundleID == AppState.builtInXSignApp.bundleID && $0.sourceID == nil }
-        sourceApps.insert(AppState.builtInXSignApp, at: 0)
+        let builtIn = AppState.builtInXSignApp(version: latestXSignVersion)
+        sourceApps.removeAll { $0.bundleID == builtIn.bundleID && $0.sourceID == nil }
+        sourceApps.insert(builtIn, at: 0)
+    }
+
+    /// Item do XSign que vem pronto na lista de Apps e ainda não tem arquivo
+    /// próprio: só aponta para o link "latest" do GitHub.
+    func isOfficialPlaceholder(_ item: AppItem) -> Bool {
+        item.origin == Self.officialOrigin
+            && item.filePath.isEmpty
+            && (item.installURL ?? "").isEmpty
+    }
+
+    /// Mantém o rótulo de versão desses itens igual à realidade: o não assinado
+    /// mostra a versão que o link "latest" baixa; o assinado, a instalada.
+    private func refreshOfficialXSignEntries() {
+        var changed = false
+        for i in apps.indices where isOfficialPlaceholder(apps[i]) {
+            let version = apps[i].state == .signed ? currentAppVersion : latestXSignVersion
+            if apps[i].version != version {
+                apps[i].version = version
+                changed = true
+            }
+        }
+        if changed { persist() }
     }
 
     // MARK: - Importador Universal de Recursos (.ipa, .zip, .p12, .mobileprovision, .deb, .dylib, .json)
@@ -625,7 +674,11 @@ final class AppState: ObservableObject {
         }
 
         apps.insert(signed, at: 0)
-        if settings.deleteOriginalAfterSign, app.state == .unsigned {
+        if app.state == .signed, isOfficialPlaceholder(app) {
+            // O assinado de verdade substitui o item sem arquivo que veio pronto.
+            apps.removeAll { $0.id == app.id }
+            persist()
+        } else if settings.deleteOriginalAfterSign, app.state == .unsigned {
             delete(app)
         } else {
             persist()

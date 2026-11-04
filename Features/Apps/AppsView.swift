@@ -239,12 +239,28 @@ struct AppsView: View {
             Button(L.tr("apps.action.install")) { installApp(item) }
             Button(L.tr("appinfo.title")) { infoTarget = item }
             Button(L.tr("apps.action.share")) { shareApp(item) }
-            Button(L.tr("apps.action.resign")) { signTarget = item }
+            Button(L.tr("apps.action.resign")) {
+                var target = item
+                if app.isOfficialPlaceholder(item) { target.version = app.latestXSignVersion }
+                signTarget = target
+            }
             Button(L.tr("common.delete"), role: .destructive) { app.delete(item) }
         }
     }
 
     private func installApp(_ item: AppItem) {
+        // O XSign que vem pronto na lista ainda não tem arquivo assinado:
+        // assina a versão do link "latest" com o certificado e oferece instalar.
+        if app.isOfficialPlaceholder(item) {
+            var latest = item
+            latest.version = app.latestXSignVersion
+            if app.currentCertificate != nil {
+                quickSignTarget = latest
+            } else {
+                signTarget = latest
+            }
+            return
+        }
         Task {
             do {
                 if let installURL = item.installURL, !installURL.isEmpty {

@@ -1,6 +1,6 @@
 {
-  "version": "1.1.0",
-  "build": "2",
+  "version": "1.1.1",
+  "build": "3",
   "ipaUrl": "https://github.com/lotte-xrd/XSign/releases/download/latest/XSign-unsigned.ipa",
-  "notes": "XSign 1.1.0: tweaks de verdade (.dylib, .deb e .framework, com ElleKit), assinatura em lote, log da assinatura ao vivo, informações do app, entitlements do certificado, importar do ESign/KSign, gerenciador de arquivos e downloads em segundo plano com notificação."
+  "notes": "XSign 1.1.1: o XSign que vem pronto na lista de Apps agora mostra a versão certa e instala direto (assina a versão mais nova com o seu certificado). Inclui tudo do 1.1.0: tweaks de verdade (.dylib, .deb e .framework, com ElleKit), assinatura em lote, log da assinatura ao vivo, gerenciador de arquivos e downloads em segundo plano."
 }
