@@ -36,12 +36,22 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p "$RUNNER_TEMP/ellekit" Vendor/ElleKit
-          if gh release download -R evelyneee/ellekit --pattern '*.deb' -D "$RUNNER_TEMP/ellekit"; then
-            DEB=$(ls "$RUNNER_TEMP"/ellekit/*iphoneos-arm64*.deb 2>/dev/null | head -n1 || true)
-            if [ -z "$DEB" ]; then DEB=$(ls "$RUNNER_TEMP"/ellekit/*.deb | head -n1); fi
+          # Inclui pré-lançamentos: o ElleKit nem sempre marca um release como "latest".
+          TAGS=$(gh release list -R evelyneee/ellekit --limit 15 --json tagName --jq '.[].tagName' || true)
+          for TAG in $TAGS; do
+            if gh release download "$TAG" -R evelyneee/ellekit --pattern '*.deb' -D "$RUNNER_TEMP/ellekit" --clobber; then
+              echo "Release do ElleKit: $TAG"
+              break
+            fi
+          done
+          ls -la "$RUNNER_TEMP/ellekit" || true
+          DEB=$(ls "$RUNNER_TEMP"/ellekit/*iphoneos-arm64*.deb 2>/dev/null | head -n1 || true)
+          if [ -z "$DEB" ]; then DEB=$(ls "$RUNNER_TEMP"/ellekit/*.deb 2>/dev/null | head -n1 || true); fi
+          if [ -n "$DEB" ]; then
             cp "$DEB" Vendor/ElleKit/ellekit.deb
+            echo "ElleKit embutido: $(basename "$DEB")"
           else
-            echo "::warning::Não foi possível baixar o ElleKit."
+            echo "::warning::Não foi possível baixar o ElleKit. Tweaks com Substrate vão pedir o .deb do ElleKit na pasta Tweaks."
           fi
 
       - name: Gerar o projeto
