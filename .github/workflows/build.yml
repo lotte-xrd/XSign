@@ -29,27 +29,24 @@ jobs:
       - name: Instalar XcodeGen
         run: brew install xcodegen
 
-      - name: Baixar ElleKit (Substrate para os tweaks)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compilar ElleKit (Substrate para os tweaks)
         run: |
-          mkdir -p "$RUNNER_TEMP/ellekit" Vendor/ElleKit
-          # Inclui pré-lançamentos: o ElleKit nem sempre marca um release como "latest".
-          TAGS=$(gh release list -R evelyneee/ellekit --limit 15 --json tagName --jq '.[].tagName' || true)
-          for TAG in $TAGS; do
-            if gh release download "$TAG" -R evelyneee/ellekit --pattern '*.deb' -D "$RUNNER_TEMP/ellekit" --clobber; then
-              echo "Release do ElleKit: $TAG"
-              break
+          mkdir -p Vendor/ElleKit
+          SRC="$RUNNER_TEMP/ellekit-src"
+          OUT="$RUNNER_TEMP/ellekit-build/"
+          if git clone --depth 1 https://github.com/evelyneee/ellekit "$SRC" && \
+             (cd "$SRC" && xcodebuild -project ellekit.xcodeproj -scheme ellekit -configuration Release \
+               -destination 'generic/platform=iOS' BUILD_DIR="$OUT" \
+               CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" -quiet); then
+            LIB=$(find "$OUT" -name libellekit.dylib -path '*iphoneos*' | head -n1 || true)
+            if [ -n "$LIB" ]; then
+              cp "$LIB" Vendor/ElleKit/ellekit-substrate.bin
+              cp "$SRC/LICENSE" Vendor/ElleKit/ellekit-LICENSE.txt
+              echo "ElleKit compilado: $LIB ($(git -C "$SRC" rev-parse --short HEAD))"
             fi
-          done
-          ls -la "$RUNNER_TEMP/ellekit" || true
-          DEB=$(ls "$RUNNER_TEMP"/ellekit/*iphoneos-arm64*.deb 2>/dev/null | head -n1 || true)
-          if [ -z "$DEB" ]; then DEB=$(ls "$RUNNER_TEMP"/ellekit/*.deb 2>/dev/null | head -n1 || true); fi
-          if [ -n "$DEB" ]; then
-            cp "$DEB" Vendor/ElleKit/ellekit.deb
-            echo "ElleKit embutido: $(basename "$DEB")"
-          else
-            echo "::warning::Não foi possível baixar o ElleKit. Tweaks com Substrate vão pedir o .deb do ElleKit na pasta Tweaks."
+          fi
+          if [ ! -f Vendor/ElleKit/ellekit-substrate.bin ]; then
+            echo "::warning::O ElleKit não compilou. Tweaks com Substrate vão pedir o .deb do ElleKit na pasta Tweaks."
           fi
 
       - name: Gerar o projeto

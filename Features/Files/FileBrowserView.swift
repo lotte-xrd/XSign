@@ -720,6 +720,8 @@ struct QuickLookPreview: UIViewControllerRepresentable {
         let url: URL
         init(url: URL) { self.url = url }
         func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
-        func previewItem(at index: Int) -> QLPreviewItem { url as NSURL }
+        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+            url as NSURL
+        }
     }
 }

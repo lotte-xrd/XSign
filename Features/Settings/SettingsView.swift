@@ -208,7 +208,23 @@ struct AboutView: View {
             Section(L.tr("about.openSource")) {
                 LabeledContent("zsign 1.1.3", value: "C++ / OpenSSL")
                 LabeledContent("ZIPFoundation", value: "MIT")
-                LabeledContent("ElleKit", value: "Substrate")
+                if let licenseURL = Bundle.main.url(forResource: "ellekit-LICENSE", withExtension: "txt"),
+                   let license = try? String(contentsOf: licenseURL, encoding: .utf8) {
+                    NavigationLink {
+                        ScrollView {
+                            Text(license)
+                                .font(.caption.monospaced())
+                                .padding()
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .navigationTitle("ElleKit")
+                        .navigationBarTitleDisplayMode(.inline)
+                    } label: {
+                        LabeledContent("ElleKit", value: "BSD-3-Clause")
+                    }
+                } else {
+                    LabeledContent("ElleKit", value: "BSD-3-Clause")
+                }
                 LabeledContent("Exploiting iOS", value: "OTA itms-services")
             }
         }
