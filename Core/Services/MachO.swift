@@ -382,6 +382,10 @@ final class MachOFile {
 
     var architectures: [String] { slices.map { $0.architecture } }
 
+    /// MH_EXECUTE = 2, MH_DYLIB = 6, MH_DSYM = 10…
+    var fileType: UInt32 { slices.first?.buffer.moU32(12) ?? 0 }
+    var isDylib: Bool { fileType == 6 }
+
     var loadedDylibs: [String] {
         guard let s = slices.first else { return [] }
         return s.commands

@@ -40,7 +40,8 @@ jobs:
              (cd "$SRC" && xcodebuild -project ellekit.xcodeproj -scheme ellekit -configuration Release \
                -destination 'generic/platform=iOS' BUILD_DIR="$OUT" \
                CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" -quiet); then
-            LIB=$(find "$OUT" -name libellekit.dylib -path '*iphoneos*' | head -n1 || true)
+            LIB="$OUT/Release-iphoneos/libellekit.dylib"
+            [ -f "$LIB" ] || LIB=$(find "$OUT" -name libellekit.dylib -path '*iphoneos*' -not -path '*.dSYM/*' | head -n1 || true)
             if [ -n "$LIB" ]; then
               cp "$LIB" Vendor/ElleKit/ellekit-substrate.bin
               cp "$SRC/LICENSE" Vendor/ElleKit/ellekit-LICENSE.txt

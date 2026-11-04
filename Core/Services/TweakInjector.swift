@@ -248,7 +248,7 @@ struct TweakInjector {
     private func findElleKit(scratch: URL) -> URL? {
         // libellekit.dylib compilado pelo workflow e embutido no XSign
         if let bundled = Bundle.main.url(forResource: "ellekit-substrate", withExtension: "bin"),
-           MachOFile.isMachO(bundled) {
+           (try? MachOFile(url: bundled))?.isDylib == true {
             return bundled
         }
         var debs: [URL] = []
