@@ -31,6 +31,19 @@ jobs:
       - name: Instalar XcodeGen
         run: brew install xcodegen
 
+      - name: Baixar ElleKit (Substrate para os tweaks)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/ellekit" Vendor/ElleKit
+          if gh release download -R evelyneee/ellekit --pattern '*.deb' -D "$RUNNER_TEMP/ellekit"; then
+            DEB=$(ls "$RUNNER_TEMP"/ellekit/*iphoneos-arm64*.deb 2>/dev/null | head -n1 || true)
+            if [ -z "$DEB" ]; then DEB=$(ls "$RUNNER_TEMP"/ellekit/*.deb | head -n1); fi
+            cp "$DEB" Vendor/ElleKit/ellekit.deb
+          else
+            echo "::warning::Não foi possível baixar o ElleKit."
+          fi
+
       - name: Gerar o projeto
         run: xcodegen generate
 

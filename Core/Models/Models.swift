@@ -229,4 +229,21 @@ struct SignProgress: Equatable {
     var finalVersion: String?
     var fileSize: Int64?
     var error: String?
+    /// Linhas do log mostradas ao vivo na tela de assinatura.
+    var log: [SignLogLine] = []
+}
+
+// MARK: - Log da assinatura
+
+enum SignLogLevel: String, Codable {
+    case info, detail, success, warning, error
+}
+
+struct SignLogLine: Identifiable, Equatable {
+    var id = UUID()
+    var date = Date()
+    var level: SignLogLevel
+    var text: String
+    /// Rótulo opcional (ex.: nome do app na assinatura em lote).
+    var tag: String? = nil
 }

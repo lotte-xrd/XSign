@@ -8,11 +8,17 @@ struct AppsView: View {
     @State private var actionTarget: AppItem?
     @State private var signTarget: AppItem?
     @State private var quickSignTarget: AppItem?
+    @State private var infoTarget: AppItem?
     @State private var showIPAImporter = false
     @State private var showCertImporter = false
     @State private var shareItems: [Any] = []
     @State private var showShare = false
     @State private var errorAlertMessage: String?
+
+    // Seleção para assinatura em lote
+    @State private var selecting = false
+    @State private var selected: Set<UUID> = []
+    @State private var bulkJob: BulkSignJob?
 
     private var list: [AppItem] {
         app.apps.filter { $0.state == segment }
@@ -32,6 +38,7 @@ struct AppsView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, Spacing.screen).padding(.vertical, 8)
+                .disabled(selecting)
 
                 if list.isEmpty {
                     VStack(spacing: 14) {
@@ -46,32 +53,77 @@ struct AppsView: View {
                 } else {
                     List {
                         ForEach(list) { item in
-                            Button { actionTarget = item } label: {
-                                AppRow(
-                                    item: item,
-                                    onSign: { signTarget = item },
-                                    onInstall: { installApp(item) }
-                                )
+                            Button {
+                                if selecting {
+                                    toggleSelection(item)
+                                } else {
+                                    actionTarget = item
+                                }
+                            } label: {
+                                HStack(spacing: 10) {
+                                    if selecting {
+                                        Image(systemName: selected.contains(item.id) ? "checkmark.circle.fill" : "circle")
+                                            .font(.title3)
+                                            .foregroundStyle(selected.contains(item.id) ? Color.graphite : Color.ash)
+                                            .transition(.scale.combined(with: .opacity))
+                                    }
+                                    AppRow(
+                                        item: item,
+                                        showsAction: !selecting,
+                                        onSign: { signTarget = item },
+                                        onInstall: { installApp(item) }
+                                    )
+                                }
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .swipeActions {
-                                Button(role: .destructive) { app.delete(item) } label: {
-                                    Label(L.tr("common.delete"), systemImage: "trash")
+                                if !selecting {
+                                    Button(role: .destructive) { app.delete(item) } label: {
+                                        Label(L.tr("common.delete"), systemImage: "trash")
+                                    }
+                                    Button { infoTarget = item } label: {
+                                        Label(L.tr("appinfo.title"), systemImage: "info.circle")
+                                    }
+                                    .tint(Color.lead)
                                 }
                             }
                         }
                     }
+                    .animation(.xsignSmooth, value: selecting)
                 }
             }
             .navigationTitle(L.tr("tab.apps"))
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $query, prompt: L.tr("common.search"))
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showIPAImporter = true } label: {
-                        Image(systemName: "plus")
+                ToolbarItem(placement: .topBarLeading) {
+                    if segment == .unsigned && !list.isEmpty {
+                        Button(selecting ? L.tr("common.done") : L.tr("bulk.select")) {
+                            withAnimation(.xsignSmooth) {
+                                selecting.toggle()
+                                if !selecting { selected.removeAll() }
+                            }
+                        }
                     }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !selecting {
+                        Button { showIPAImporter = true } label: {
+                            Image(systemName: "plus")
+                        }
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if selecting {
+                    selectionBar
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .onChange(of: segment) { _ in
+                selecting = false
+                selected.removeAll()
             }
             .confirmationDialog(actionTarget?.name ?? "", isPresented: .init(
                 get: { actionTarget != nil }, set: { if !$0 { actionTarget = nil } }
@@ -79,11 +131,15 @@ struct AppsView: View {
                 if let item = actionTarget { actionButtons(for: item) }
             }
             .sheet(item: $signTarget) { SignView(app: $0) }
+            .sheet(item: $infoTarget) { AppInfoView(item: $0) }
             .sheet(isPresented: $showCertImporter) { ImportCertificateView() }
             .fullScreenCover(item: $quickSignTarget) { target in
                 if let cert = app.currentCertificate {
                     SignProgressView(app: target, certificate: cert, options: SignOptions(name: target.name, bundleID: target.bundleID, version: target.version))
                 }
+            }
+            .fullScreenCover(item: $bulkJob) { job in
+                BulkSignView(apps: job.apps)
             }
             .sheet(isPresented: $showShare) {
                 ShareSheet(items: shareItems)
@@ -110,6 +166,61 @@ struct AppsView: View {
         }
     }
 
+    // MARK: Barra de seleção (lote)
+
+    private var selectionBar: some View {
+        VStack(spacing: 8) {
+            if app.currentCertificate == nil {
+                Text(L.tr("sign.noCert"))
+                    .font(.caption)
+                    .foregroundStyle(Color.brick)
+            }
+            HStack(spacing: 10) {
+                Button {
+                    withAnimation(.xsignSmooth) {
+                        if selected.count == list.count {
+                            selected.removeAll()
+                        } else {
+                            selected = Set(list.map { $0.id })
+                        }
+                    }
+                } label: {
+                    Text(selected.count == list.count ? L.tr("bulk.selectNone") : L.tr("bulk.selectAll"))
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .background(Color.fill, in: RoundedRectangle(cornerRadius: Radius.button, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.graphite)
+
+                PrimaryButton(
+                    title: L.tr("bulk.signCount", selected.count),
+                    enabled: !selected.isEmpty && app.currentCertificate?.status.canSign == true
+                ) {
+                    let chosen = list.filter { selected.contains($0.id) }
+                    withAnimation(.xsignSmooth) {
+                        selecting = false
+                        selected.removeAll()
+                    }
+                    bulkJob = BulkSignJob(apps: chosen)
+                }
+            }
+        }
+        .padding(Spacing.screen)
+        .background(.bar)
+    }
+
+    private func toggleSelection(_ item: AppItem) {
+        withAnimation(.xsignSmooth) {
+            if selected.contains(item.id) {
+                selected.remove(item.id)
+            } else {
+                selected.insert(item.id)
+            }
+        }
+    }
+
     @ViewBuilder
     private func actionButtons(for item: AppItem) -> some View {
         if item.state == .unsigned {
@@ -121,10 +232,12 @@ struct AppsView: View {
                     signTarget = item
                 }
             }
+            Button(L.tr("appinfo.title")) { infoTarget = item }
             Button(L.tr("apps.action.share")) { shareApp(item) }
             Button(L.tr("common.delete"), role: .destructive) { app.delete(item) }
         } else {
             Button(L.tr("apps.action.install")) { installApp(item) }
+            Button(L.tr("appinfo.title")) { infoTarget = item }
             Button(L.tr("apps.action.share")) { shareApp(item) }
             Button(L.tr("apps.action.resign")) { signTarget = item }
             Button(L.tr("common.delete"), role: .destructive) { app.delete(item) }
@@ -171,6 +284,7 @@ struct AppsView: View {
 
 struct AppRow: View {
     let item: AppItem
+    var showsAction: Bool = true
     var onSign: (() -> Void)? = nil
     var onInstall: (() -> Void)? = nil
 
@@ -191,13 +305,15 @@ struct AppRow: View {
                 }
             }
             Spacer(minLength: 8)
-            if item.state == .signed {
-                PillButton(title: L.tr("apps.action.install"), filled: true) {
-                    onInstall?()
-                }
-            } else {
-                PillButton(title: L.tr("apps.action.sign"), filled: true) {
-                    onSign?()
+            if showsAction {
+                if item.state == .signed {
+                    PillButton(title: L.tr("apps.action.install"), filled: true) {
+                        onInstall?()
+                    }
+                } else {
+                    PillButton(title: L.tr("apps.action.sign"), filled: true) {
+                        onSign?()
+                    }
                 }
             }
         }

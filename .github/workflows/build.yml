@@ -4,9 +4,11 @@ name: Build IPA (unsigned)
 # Você assina depois com o seu certificado — pelo próprio XSign ou pelo AltStore/
 # SideStore. Não precisa de nenhum segredo/certificado neste workflow.
 
+# Todo push compila o .ipa (artefato). Só a `main` publica o release "latest"
+# que a Loja e o auto-update do XSign usam.
 on:
   push:
-    branches: [ main ]
+    branches: [ '**' ]
   workflow_dispatch:
 
 permissions:
@@ -26,6 +28,21 @@ jobs:
 
       - name: Instalar XcodeGen
         run: brew install xcodegen
+
+      - name: Baixar ElleKit (Substrate para os tweaks)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/ellekit" Vendor/ElleKit
+          if gh release download -R evelyneee/ellekit --pattern '*.deb' -D "$RUNNER_TEMP/ellekit"; then
+            ls -la "$RUNNER_TEMP/ellekit"
+            DEB=$(ls "$RUNNER_TEMP"/ellekit/*iphoneos-arm64*.deb 2>/dev/null | head -n1 || true)
+            if [ -z "$DEB" ]; then DEB=$(ls "$RUNNER_TEMP"/ellekit/*.deb | head -n1); fi
+            cp "$DEB" Vendor/ElleKit/ellekit.deb
+            echo "ElleKit embutido: $(basename "$DEB")"
+          else
+            echo "::warning::Não foi possível baixar o ElleKit. Tweaks com Substrate vão pedir o .deb do ElleKit na pasta Tweaks."
+          fi
 
       - name: Gerar o projeto
         run: xcodegen generate
@@ -63,6 +80,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publicar Release Latest para a Loja do XSign
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

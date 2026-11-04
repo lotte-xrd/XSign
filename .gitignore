@@ -14,3 +14,6 @@ XSign.xcodeproj/
 .swiftpm/
 .build/
 Packages/
+
+## ElleKit baixado pelo workflow (não versionado)
+Vendor/ElleKit/

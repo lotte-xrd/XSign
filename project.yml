@@ -9,6 +9,9 @@ packages:
   ZIPFoundation:
     url: https://github.com/weichsel/ZIPFoundation
     from: "0.9.19"
+  SWCompression:
+    url: https://github.com/tsolomko/SWCompression
+    from: "4.8.0"
 
 targets:
   XSign:
@@ -21,8 +24,13 @@ targets:
       - path: Core
       - path: Features
       - path: Resources
+      # ElleKit (.deb) baixado pelo workflow; vira CydiaSubstrate nos tweaks.
+      - path: Vendor/ElleKit
+        optional: true
+        buildPhase: resources
     dependencies:
       - package: ZIPFoundation
+      - package: SWCompression
     info:
       path: Resources/Info.plist
       properties:

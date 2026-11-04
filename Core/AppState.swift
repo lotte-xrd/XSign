@@ -78,6 +78,9 @@ final class AppState: ObservableObject {
                 self?.ensureBuiltInXSign()
             }
         }
+        downloads.notificationsEnabled = { [weak self] in
+            self?.settings.notifyDownloads ?? true
+        }
         downloads.onDownloadFinished = { [weak self] task, fileURL in
             guard let self else { return }
             Task { @MainActor in
@@ -600,6 +603,36 @@ final class AppState: ObservableObject {
 
     // MARK: - Apps
 
+    /// Registra o resultado de uma assinatura na aba Assinados (usado pela
+    /// assinatura individual e pela assinatura em lote).
+    @discardableResult
+    func registerSigned(original app: AppItem, certificate: Certificate, options: SignOptions, progress: SignProgress) -> AppItem {
+        var signed = app
+        signed.id = UUID()
+        signed.state = .signed
+        signed.certificateID = certificate.id
+        signed.certificateName = certificate.nickname
+        signed.signedAt = Date()
+        signed.filePath = progress.outputPath ?? app.filePath
+        signed.installURL = progress.installURL
+        signed.signedDownloadURL = progress.downloadURL
+        signed.shareURL = progress.shareURL
+        signed.name = progress.finalName ?? options.name ?? app.name
+        signed.bundleID = progress.finalBundleID ?? options.bundleID ?? app.bundleID
+        signed.version = progress.finalVersion ?? options.version ?? app.version
+        if let fSize = progress.fileSize, fSize > 0 {
+            signed.size = fSize
+        }
+
+        apps.insert(signed, at: 0)
+        if settings.deleteOriginalAfterSign, app.state == .unsigned {
+            delete(app)
+        } else {
+            persist()
+        }
+        return signed
+    }
+
     func delete(_ app: AppItem) {
         apps.removeAll { $0.id == app.id }
         if !app.filePath.isEmpty && !app.filePath.hasPrefix("http") {
@@ -638,6 +671,13 @@ struct Settings: Codable {
     var installMethod = "remoteServer"
     var serverURL = "https://exploiting-ios.online"
     var appIcon = "graphite"
+    /// Opcional para não quebrar a leitura de ajustes salvos por versões antigas.
+    var notifyDownloadsPref: Bool?
+
+    var notifyDownloads: Bool {
+        get { notifyDownloadsPref ?? true }
+        set { notifyDownloadsPref = newValue }
+    }
 
     static func load() -> Settings {
         guard let data = UserDefaults.standard.data(forKey: "settings"),

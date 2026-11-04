@@ -234,6 +234,7 @@ struct TweaksView: View {
             at: Paths.tweaks,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
-        )) ?? []).filter { ["dylib", "deb"].contains($0.pathExtension.lowercased()) }
+        )) ?? []).filter { ["dylib", "deb", "framework", "bundle"].contains($0.pathExtension.lowercased()) }
+            .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
     }
 }

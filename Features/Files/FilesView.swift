@@ -15,21 +15,35 @@ struct FilesView: View {
                     StorageBar(appsBytes: appsBytes, downloadsBytes: downloadsBytes, otherBytes: otherBytes)
                         .listRowInsets(EdgeInsets(top: 12, leading: Spacing.screen, bottom: 12, trailing: Spacing.screen))
                 }
+                Section {
+                    NavigationLink {
+                        FileBrowserView(directory: Paths.documents, title: L.tr("files.allFiles"))
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "externaldrive").foregroundStyle(Color.graphite).frame(width: 28)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(L.tr("files.allFiles")).font(.subheadline.weight(.semibold))
+                                Text(L.tr("files.allFiles.subtitle")).font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+
                 Section(L.tr("files.folders")) {
                     NavigationLink {
-                        FolderBrowserView(title: L.tr("apps.unsigned.plain"), folderURL: Paths.unsigned)
+                        FileBrowserView(directory: Paths.unsigned, title: L.tr("apps.unsigned.plain"))
                     } label: {
                         folderRow(L.tr("apps.unsigned.plain"), "folder", count: app.apps.filter { $0.state == .unsigned }.count)
                     }
 
                     NavigationLink {
-                        FolderBrowserView(title: L.tr("apps.signed.plain"), folderURL: Paths.signed)
+                        FileBrowserView(directory: Paths.signed, title: L.tr("apps.signed.plain"))
                     } label: {
                         folderRow(L.tr("apps.signed.plain"), "checkmark.seal", count: app.apps.filter { $0.state == .signed }.count)
                     }
 
                     NavigationLink {
-                        FolderBrowserView(title: L.tr("tab.downloads"), folderURL: Paths.downloads)
+                        FileBrowserView(directory: Paths.downloads, title: L.tr("tab.downloads"))
                     } label: {
                         folderRow(L.tr("tab.downloads"), "arrow.down.circle", count: countFiles(in: Paths.downloads))
                     }
@@ -41,7 +55,7 @@ struct FilesView: View {
                     }
 
                     NavigationLink {
-                        FolderBrowserView(title: L.tr("files.tweaks"), folderURL: Paths.tweaks)
+                        FileBrowserView(directory: Paths.tweaks, title: L.tr("files.tweaks"))
                     } label: {
                         folderRow(L.tr("files.tweaks"), "puzzlepiece.extension", count: tweaksCount)
                     }
@@ -138,91 +152,6 @@ struct StorageBar: View {
         HStack(spacing: 4) {
             RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 6, height: 6)
             Text(label).lineLimit(1)
-        }
-    }
-}
-
-/// Navegador real de arquivos para cada pasta interna do XSign.
-struct FolderBrowserView: View {
-    @EnvironmentObject private var app: AppState
-    let title: String
-    let folderURL: URL
-
-    @State private var files: [URL] = []
-    @State private var shareURL: URL?
-
-    var body: some View {
-        List {
-            if files.isEmpty {
-                EmptyStateView(
-                    title: L.tr("apps.empty.title"),
-                    message: folderURL.lastPathComponent,
-                    systemImage: "folder"
-                )
-                .listRowBackground(Color.clear)
-            } else {
-                ForEach(files, id: \.path) { file in
-                    HStack(spacing: 12) {
-                        Image(systemName: iconFor(file))
-                            .foregroundStyle(Color.graphite)
-                            .frame(width: 28)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(file.lastPathComponent)
-                                .font(.subheadline.weight(.medium))
-                                .lineLimit(1)
-                            Text(sizeString(for: file))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button {
-                            shareURL = file
-                        } label: {
-                            Image(systemName: "square.and.arrow.up")
-                                .foregroundStyle(Color.graphite)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .swipeActions {
-                        Button(role: .destructive) {
-                            try? FileManager.default.removeItem(at: file)
-                            reload()
-                        } label: {
-                            Label(L.tr("common.delete"), systemImage: "trash")
-                        }
-                    }
-                }
-            }
-        }
-        .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear(perform: reload)
-        .sheet(isPresented: Binding(get: { shareURL != nil }, set: { if !$0 { shareURL = nil } })) {
-            if let shareURL { ShareSheet(items: [shareURL]) }
-        }
-    }
-
-    private func reload() {
-        Paths.ensure()
-        files = ((try? FileManager.default.contentsOfDirectory(
-            at: folderURL,
-            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        )) ?? []).sorted { $0.lastPathComponent < $1.lastPathComponent }
-    }
-
-    private func sizeString(for url: URL) -> String {
-        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? Paths.folderSize(url)
-        return ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
-    }
-
-    private func iconFor(_ url: URL) -> String {
-        switch url.pathExtension.lowercased() {
-        case "ipa": return "app.badge"
-        case "p12", "mobileprovision": return "checkmark.seal"
-        case "deb", "dylib": return "puzzlepiece.extension"
-        case "zip": return "doc.zipper"
-        default: return "doc"
         }
     }
 }

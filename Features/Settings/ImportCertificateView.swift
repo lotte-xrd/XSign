@@ -47,6 +47,30 @@ struct ImportCertificateView: View {
                     }
                 }
 
+                Section(L.tr("certimport.section")) {
+                    ForEach([CertImportSource.esign, CertImportSource.ksign]) { src in
+                        NavigationLink {
+                            CertificateFilesImportView(source: src, onDone: { dismiss() })
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: src.symbol)
+                                    .font(.headline)
+                                    .frame(width: 30, height: 30)
+                                    .background(Color.fill, in: RoundedRectangle(cornerRadius: 7))
+                                    .foregroundStyle(Color.graphite)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(L.tr("certimport.from", src.title))
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(Color.graphite)
+                                    Text(L.tr("certimport.subtitle"))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Section(L.tr("importcert.files")) {
                     fileRow("P12", p12FileName ?? L.tr("importcert.p12"), loaded: p12Data != nil) {
                         pickerKind = .p12

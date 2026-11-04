@@ -64,6 +64,19 @@ struct CertificateService {
         )
     }
 
+    /// Entitlements do perfil de provisionamento de um certificado já importado.
+    func entitlements(for cert: Certificate) -> [String: Any] {
+        guard let data = try? Data(contentsOf: Paths.resolve(cert.profilePath)) else { return [:] }
+        return entitlements(fromProfile: data)
+    }
+
+    func entitlements(fromProfile data: Data) -> [String: Any] {
+        guard let plist = Self.extractPlist(from: data),
+              let dict = try? PropertyListSerialization.propertyList(from: plist, options: [], format: nil) as? [String: Any]
+        else { return [:] }
+        return dict["Entitlements"] as? [String: Any] ?? [:]
+    }
+
     /// Salva o par .p12 + .mobileprovision em `Documents/Certificates/<id>/` e retorna o `Certificate`.
     func saveCertificate(p12Data: Data, profileData: Data, password: String, nickname: String?, makeActive: Bool) throws -> Certificate {
         guard validateP12(data: p12Data, password: password) else {
@@ -160,6 +173,137 @@ struct CertificateService {
             nickname: nil,
             makeActive: makeActive
         )
+    }
+
+    // MARK: - Importar de outros assinadores (ESign, KSign) ou de arquivos soltos
+
+    /// O que foi encontrado nos arquivos escolhidos.
+    struct CertificateCandidate {
+        var p12Data: Data?
+        var p12Name: String?
+        var profileData: Data?
+        var profileName: String?
+        var passwordHints: [String] = []
+        var foundPassword: String?
+        var profile: ProfileInfo?
+    }
+
+    /// Lê arquivos soltos, pastas e .zip, separa .p12 / .mobileprovision e tenta
+    /// descobrir a senha em .txt / .json / .plist que vierem junto.
+    func collectCertificateFiles(_ urls: [URL]) -> CertificateCandidate {
+        var candidate = CertificateCandidate()
+        var strong: [String] = []
+        var weak: [String] = []
+        let maxSize: UInt64 = 20 * 1024 * 1024
+
+        func consume(name: String, data: Data) {
+            let base = (name as NSString).lastPathComponent
+            let lower = base.lowercased()
+            if name.lowercased().contains("__macosx") || base.hasPrefix("._") { return }
+            if lower.hasSuffix(".p12") || lower.hasSuffix(".pfx") {
+                if candidate.p12Data == nil {
+                    candidate.p12Data = data
+                    candidate.p12Name = base
+                }
+            } else if lower.hasSuffix(".mobileprovision") || lower.hasSuffix(".provisionprofile") {
+                if candidate.profileData == nil, let info = try? readProfile(data: data) {
+                    candidate.profileData = data
+                    candidate.profileName = base
+                    candidate.profile = info
+                }
+            } else if lower.hasSuffix(".txt") || lower.hasSuffix(".json") || lower.hasSuffix(".plist")
+                        || lower.hasSuffix(".md") || lower.hasSuffix(".rtf") || !lower.contains(".") {
+                let hints = Self.passwordHints(from: data)
+                strong.append(contentsOf: hints.strong)
+                weak.append(contentsOf: hints.weak)
+            }
+        }
+
+        for url in urls {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else { continue }
+
+            if isDirectory.boolValue {
+                let walker = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey])
+                while let file = walker?.nextObject() as? URL {
+                    let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+                    guard values?.isRegularFile == true, UInt64(values?.fileSize ?? 0) < maxSize,
+                          let data = try? Data(contentsOf: file) else { continue }
+                    consume(name: file.path, data: data)
+                }
+            } else if url.pathExtension.lowercased() == "zip", let archive = Archive(url: url, accessMode: .read) {
+                for entry in archive where entry.type == .file && entry.uncompressedSize < maxSize {
+                    if let data = try? Self.extractEntry(entry, from: archive) {
+                        consume(name: entry.path, data: data)
+                    }
+                }
+            } else if let data = try? Data(contentsOf: url) {
+                consume(name: url.lastPathComponent, data: data)
+            }
+        }
+
+        var seen = Set<String>()
+        let defaults = ["", "1", "1234", "123456", "123", "0000", "password", "apple"]
+        candidate.passwordHints = (strong + weak + defaults).filter { seen.insert($0).inserted }.prefix(48).map { $0 }
+        if let p12 = candidate.p12Data {
+            candidate.foundPassword = candidate.passwordHints.first { validateP12(data: p12, password: $0) }
+        }
+        return candidate
+    }
+
+    /// Possíveis senhas num arquivo de texto/JSON/plist. `strong` = valores de chaves
+    /// com nome de senha; `weak` = demais linhas/valores curtos.
+    static func passwordHints(from data: Data) -> (strong: [String], weak: [String]) {
+        var strong: [String] = []
+        var weak: [String] = []
+        let passwordWords = ["pass", "pwd", "senha", "contrase", "clave", "密码", "mật khẩu", "mat khau"]
+
+        func isPasswordKey(_ key: String) -> Bool {
+            let lower = key.lowercased()
+            return passwordWords.contains { lower.contains($0) }
+        }
+
+        func walk(_ value: Any, key: String?) {
+            if let dict = value as? [String: Any] {
+                for (k, v) in dict { walk(v, key: k) }
+            } else if let array = value as? [Any] {
+                for v in array { walk(v, key: key) }
+            } else if let s = value as? String {
+                let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard trimmed.count <= 64 else { return }
+                if let key, isPasswordKey(key) { strong.append(trimmed) } else if !trimmed.isEmpty { weak.append(trimmed) }
+            } else if let n = value as? NSNumber, let key, isPasswordKey(key) {
+                strong.append(n.stringValue)
+            }
+        }
+
+        if let json = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) {
+            walk(json, key: nil)
+            return (strong, weak)
+        }
+        if let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+           !(plist is String) {
+            walk(plist, key: nil)
+            return (strong, weak)
+        }
+
+        let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) ?? ""
+        for rawLine in text.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty, line.count <= 120 else { continue }
+            if let sep = line.firstIndex(where: { $0 == ":" || $0 == "=" || $0 == "：" }) {
+                let key = String(line[..<sep])
+                let value = line[line.index(after: sep)...].trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty && value.count <= 64 {
+                    if isPasswordKey(key) { strong.append(value) } else { weak.append(value) }
+                }
+            }
+            if line.count <= 64 { weak.append(line) }
+        }
+        return (strong, weak)
     }
 
     /// Detecta e importa automaticamente o certificado com o qual o próprio XSign foi instalado!

@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct XSignApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var appState = AppState()
     @StateObject private var language = LocalizationManager.shared
@@ -34,6 +35,9 @@ struct XSignApp: App {
             .preferredColorScheme(appState.settings.appearance.colorScheme)
             .id(language.code) // recria a árvore ao trocar de idioma
             .onOpenURL { appState.handle(url: $0) }
+            .onReceive(NotificationCenter.default.publisher(for: .xsignOpenDownloads)) { _ in
+                appState.selectedTab = .downloads
+            }
             .task { await appState.bootstrap() }
             .alert(
                 appState.availableUpdate.map { L.tr("update.available.title", $0.version) } ?? "",

@@ -82,17 +82,23 @@ struct SignatureLine: View {
     var progress: Double              // 0...1
     var warning: Bool = false
     var trailing: String? = nil       // ex.: "68%", "312 d"
+    /// Desligue quando já existe um X grande por perto (ex.: tela de assinatura),
+    /// para não aparecer um X pequeno em cima do grande.
+    var showsGlyph: Bool = true
 
     var body: some View {
         HStack(spacing: 8) {
-            XGlyph()
-                .fill(warning ? Color.ochre : Color.graphite)
-                .frame(width: 14, height: 14)
+            if showsGlyph {
+                XGlyph()
+                    .fill(warning ? Color.ochre : Color.graphite)
+                    .frame(width: 14, height: 14)
+            }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.hairline)
                     Capsule().fill(warning ? Color.ochre : Color.graphite)
-                        .frame(width: max(2, geo.size.width * progress))
+                        .frame(width: max(2, geo.size.width * min(1, max(0, progress))))
+                        .animation(.spring(response: 0.55, dampingFraction: 0.9), value: progress)
                 }
             }
             .frame(height: 3)

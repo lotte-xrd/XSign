@@ -208,6 +208,8 @@ struct AboutView: View {
             Section(L.tr("about.openSource")) {
                 LabeledContent("zsign 1.1.3", value: "C++ / OpenSSL")
                 LabeledContent("ZIPFoundation", value: "MIT")
+                LabeledContent("SWCompression", value: "MIT")
+                LabeledContent("ElleKit", value: "Substrate")
                 LabeledContent("Exploiting iOS", value: "OTA itms-services")
             }
         }

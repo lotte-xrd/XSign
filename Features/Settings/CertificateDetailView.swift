@@ -50,7 +50,14 @@ struct CertificateDetailView: View {
                 } label: {
                     LabeledContent(L.tr("cert.devices"), value: "\(cert.devices.count)")
                 }
-                LabeledContent(L.tr("cert.entitlements"), value: "\(cert.entitlementsCount)")
+                NavigationLink {
+                    EntitlementsView(
+                        title: L.tr("cert.entitlements"),
+                        dictionary: app.certificateService.entitlements(for: cert)
+                    )
+                } label: {
+                    LabeledContent(L.tr("cert.entitlements"), value: "\(cert.entitlementsCount)")
+                }
             }
 
             if let exportError {

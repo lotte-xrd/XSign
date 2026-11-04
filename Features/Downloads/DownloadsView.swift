@@ -17,7 +17,7 @@ struct DownloadsView: View {
                 } else {
                     List {
                         if !app.downloads.running.isEmpty {
-                            Section(L.tr("downloads.inprogress")) {
+                            Section {
                                 ForEach(app.downloads.running) { task in
                                     ActiveDownloadRow(task: task)
                                         .swipeActions {
@@ -26,6 +26,10 @@ struct DownloadsView: View {
                                             }
                                         }
                                 }
+                            } header: {
+                                Text(L.tr("downloads.inprogress"))
+                            } footer: {
+                                Text(L.tr("downloads.backgroundHint"))
                             }
                         }
                         if !app.downloads.finished.isEmpty {
@@ -57,11 +61,16 @@ struct DownloadsView: View {
                         Divider()
                         Toggle(L.tr("downloads.autoImport"), isOn: $app.settings.autoImportDownloads)
                         Toggle(L.tr("downloads.deleteAfter"), isOn: $app.settings.deleteAfterImport)
+                        Toggle(L.tr("downloads.notify"), isOn: $app.settings.notifyDownloads)
                     } label: { Image(systemName: "ellipsis.circle") }
                 }
             }
             .onChange(of: app.settings.autoImportDownloads) { _ in app.settings.save() }
             .onChange(of: app.settings.deleteAfterImport) { _ in app.settings.save() }
+            .onChange(of: app.settings.notifyDownloads) { enabled in
+                app.settings.save()
+                if enabled { DownloadNotifier.requestAuthorizationIfNeeded() }
+            }
             .alert(L.tr("downloads.fromLink"), isPresented: $showLink) {
                 TextField("https://…", text: $linkText)
                     .textInputAutocapitalization(.never)
@@ -102,11 +111,12 @@ struct ActiveDownloadRow: View {
     private var subtitle: String {
         if task.state == .queued { return L.tr("downloads.queued") }
         let w = ByteCountFormatter.string(fromByteCount: task.bytesWritten, countStyle: .file)
+        var text = w
         if task.totalBytes > 0 {
             let t = ByteCountFormatter.string(fromByteCount: task.totalBytes, countStyle: .file)
-            return "\(w) / \(t)"
+            text = "\(w) / \(t)"
         }
-        return w
+        return task.state == .paused ? "\(L.tr("downloads.paused")) · \(text)" : text
     }
 }
 
