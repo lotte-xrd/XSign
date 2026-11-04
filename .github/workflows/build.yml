@@ -78,6 +78,17 @@ jobs:
           zip -qry "$RUNNER_TEMP/XSign-unsigned.ipa" Payload
           echo "IPA em $RUNNER_TEMP/XSign-unsigned.ipa"
 
+      - name: Conferir o .ipa
+        run: |
+          unzip -l "$RUNNER_TEMP/XSign-unsigned.ipa" | grep -E "XSign.app/(XSign|ellekit-substrate.bin|ellekit-LICENSE.txt)$" || true
+          TMP="$RUNNER_TEMP/ipa-check"; mkdir -p "$TMP"
+          unzip -q -o "$RUNNER_TEMP/XSign-unsigned.ipa" "Payload/XSign.app/ellekit-substrate.bin" -d "$TMP" 2>/dev/null || true
+          if [ -f "$TMP/Payload/XSign.app/ellekit-substrate.bin" ]; then
+            otool -hv "$TMP/Payload/XSign.app/ellekit-substrate.bin" | tail -1
+          else
+            echo "::warning::O .ipa saiu sem o ElleKit embutido."
+          fi
+
       - name: Enviar o artefato
         uses: actions/upload-artifact@v4
         with:

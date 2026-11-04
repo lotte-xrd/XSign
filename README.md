@@ -85,6 +85,29 @@ seu perfil. O certificado fica só nos Secrets do seu repositório.
 > de compilação no log do Actions — normais num primeiro build. Corrija o que ele
 > indicar e rode de novo.
 
+## Funções
+
+- **Tweaks de verdade**: escolha `.dylib`, `.deb` ou `.framework` em *Assinar ▸ Tweaks*.
+  O XSign extrai o `.deb` no próprio iPhone, injeta `LC_LOAD_DYLIB` no executável,
+  corrige as dependências e, se o tweak usar Substrate, coloca o **ElleKit** no app
+  como `CydiaSubstrate.framework`. O ElleKit é compilado pelo workflow a partir do
+  código-fonte (BSD-3-Clause) e vai embutido no IPA.
+- **Assinatura em lote**: *Apps ▸ Selecionar*, marque os apps e toque em *Assinar*.
+- **Log ao vivo** da assinatura, com animação suave; dá para copiar ou compartilhar.
+- **Ver informações** de um app: Info.plist, permissões, entitlements do binário,
+  frameworks, extensões e bibliotecas vinculadas (inclusive tweaks injetados).
+- **Entitlements do certificado** em *Ajustes ▸ Certificados*.
+- **Importar do ESign / KSign**: escolha os arquivos exportados (`.p12`,
+  `.mobileprovision` ou `.zip`); a senha é procurada em `.txt`/`.json` junto.
+- **Gerenciador de arquivos** (aba Arquivos ▸ Todos os arquivos): pastas, renomear,
+  mover, duplicar, compactar/extrair, editor de texto, editor de plist, hex e Quick Look.
+- **Downloads em segundo plano**, com pausa/retomada e notificação ao terminar.
+
+### Testes
+
+`tweak-tests.yml` compila o injetor no macOS, monta `.deb` reais (xz e gzip), injeta
+num app de teste e executa o binário para confirmar que o dyld carrega os tweaks.
+
 ## Motores nativos a integrar (no macOS)
 
 | Peça | O que é | Onde entra |
