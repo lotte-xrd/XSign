@@ -1,6 +1,6 @@
 {
-  "version": "1.1.1",
-  "build": "3",
+  "version": "1.2.0",
+  "build": "4",
   "ipaUrl": "https://github.com/lotte-xrd/XSign/releases/download/latest/XSign-unsigned.ipa",
-  "notes": "XSign 1.1.1: o XSign que vem pronto na lista de Apps agora mostra a versão certa e instala direto (assina a versão mais nova com o seu certificado). Inclui tudo do 1.1.0: tweaks de verdade (.dylib, .deb e .framework, com ElleKit), assinatura em lote, log da assinatura ao vivo, gerenciador de arquivos e downloads em segundo plano."
+  "notes": "XSign 1.2.0: a assinatura continua com o app em segundo plano e avisa por notificação (toque para instalar); o link de instalação vencido é renovado sozinho; ícone, remover extensões, remover restrição de aparelho e compartilhamento de arquivos agora funcionam de verdade; aviso quando a Apple revoga o certificado; e o XSign fecha sozinho ao atualizar para a versão nova entrar."
 }

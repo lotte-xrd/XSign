@@ -53,6 +53,8 @@ struct CertificatesView: View {
             app.certificates[i].checkedAt = Date()
         }
         app.persist()
+        // Consulta também a Apple (OCSP) pelo servidor.
+        await app.refreshAppleRevocation(force: true)
         checking = false
     }
 }

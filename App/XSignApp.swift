@@ -13,6 +13,17 @@ struct XSignApp: App {
                 RootTabView()
                     .environmentObject(appState)
                     .environmentObject(language)
+                    .alert(
+                        L.tr("revoked.alert.title"),
+                        isPresented: Binding(
+                            get: { appState.revocationAlert != nil },
+                            set: { if !$0 { appState.revocationAlert = nil } }
+                        )
+                    ) {
+                        Button("OK", role: .cancel) { appState.revocationAlert = nil }
+                    } message: {
+                        Text(appState.revocationAlert ?? "")
+                    }
 
                 if let hudTitle = appState.activeHUDTitle {
                     LoadingHUDView(title: hudTitle)
@@ -37,6 +48,13 @@ struct XSignApp: App {
             .onOpenURL { appState.handle(url: $0) }
             .onReceive(NotificationCenter.default.publisher(for: .xsignOpenDownloads)) { _ in
                 appState.selectedTab = .downloads
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .xsignOpenApps)) { _ in
+                appState.selectedTab = .apps
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .xsignInstallFromNotification)) { _ in
+                appState.selectedTab = .apps
+                appState.resumePendingInstallIfNeeded()
             }
             .task { await appState.bootstrap() }
             .alert(
@@ -76,8 +94,15 @@ struct XSignApp: App {
                 switch newPhase {
                 case .active:
                     appState.startHeartbeatLoop()
+                    appState.closeForUpdateIfArmed(immediately: false)
+                    if !appState.isBootstrapping {
+                        appState.importFinishedBackgroundSigns()
+                        appState.resumePendingInstallIfNeeded()
+                        Task { await appState.refreshAppleRevocation(force: false) }
+                    }
                 case .background:
                     Task { await appState.sendHeartbeat(state: "background") }
+                    appState.closeForUpdateIfArmed(immediately: true)
                 default:
                     break
                 }

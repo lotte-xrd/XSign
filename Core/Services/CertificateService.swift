@@ -413,6 +413,53 @@ struct CertificateService {
         return .valid
     }
 
+    // MARK: - Revogação pela Apple (OCSP)
+
+    struct AppleRevocation {
+        var status: String       // "good", "revoked" ou "unknown"
+        var revokedAt: Date?
+    }
+
+    /// Certificado público (DER) de dentro do .p12. A chave privada não sai daqui.
+    func publicCertificateDER(for cert: Certificate) -> Data? {
+        guard let p12Data = try? Data(contentsOf: Paths.resolve(cert.p12Path)), !p12Data.isEmpty else { return nil }
+        let password = KeychainHelper.read(key: cert.keychainKey) ?? cert.password
+        let options: [String: Any] = [kSecImportExportPassphrase as String: password]
+        var items: CFArray?
+        guard SecPKCS12Import(p12Data as CFData, options as CFDictionary, &items) == errSecSuccess,
+              let first = (items as? [[String: Any]])?.first,
+              let identityRef = first[kSecImportItemIdentity as String] else { return nil }
+        let identity = identityRef as! SecIdentity
+        var certificate: SecCertificate?
+        guard SecIdentityCopyCertificate(identity, &certificate) == errSecSuccess, let certificate else { return nil }
+        return SecCertificateCopyData(certificate) as Data
+    }
+
+    /// Pergunta ao servidor (que consulta o OCSP da Apple) se o certificado foi
+    /// revogado. Envia só o certificado público. `nil` quando não deu para checar.
+    func appleRevocationStatus(for cert: Certificate, serverBase: String) async -> AppleRevocation? {
+        guard let der = publicCertificateDER(for: cert),
+              let url = URL(string: "\(serverBase)/api/xsign/cert-status") else { return nil }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(KeychainHelper.deviceID, forHTTPHeaderField: "X-XSign-Device")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["certificate": der.base64EncodedString()])
+
+        struct Response: Decodable {
+            let status: String
+            let revokedAt: String?
+        }
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let decoded = try? JSONDecoder().decode(Response.self, from: data),
+              ["good", "revoked", "unknown"].contains(decoded.status) else { return nil }
+        return AppleRevocation(
+            status: decoded.status,
+            revokedAt: decoded.revokedAt.flatMap(RemoteSigningService.parseServerDate)
+        )
+    }
+
     /// Revalida o certificado lendo os arquivos em disco e conferindo a senha e data.
     func checkRevocation(for cert: Certificate) async -> CertStatus {
         let p12URL = Paths.resolve(cert.p12Path)

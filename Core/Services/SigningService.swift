@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import ZIPFoundation
 
 /// Motor de assinatura. As telas falam só com este protocolo e consomem o
@@ -128,6 +129,15 @@ struct RemoteSigningService: SigningService {
         let workDir = fm.temporaryDirectory.appendingPathComponent("xsign-work-\(UUID().uuidString)", isDirectory: true)
         defer { try? fm.removeItem(at: workDir) }
 
+        // O envio segue numa sessão em segundo plano; o que roda no aparelho
+        // (baixar, injetar, montar o envio) ganha alguns segundos extras.
+        let backgroundGuard = BackgroundTaskGuard(name: "xsign-sign")
+        defer { backgroundGuard.end() }
+        DownloadNotifier.requestAuthorizationIfNeeded()
+        let versionEdited = options.version.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines) != app.version.trimmingCharacters(in: .whitespacesAndNewlines)
+        } ?? false
+
         // 1. Certificado e origem do .ipa
         let t0 = Date()
         emitter.step(.extract, .running(detail: certificate.nickname))
@@ -251,6 +261,8 @@ struct RemoteSigningService: SigningService {
                 customName: customName,
                 customBundleID: customBundle,
                 customVersion: customVersion,
+                applyVersion: versionEdited,
+                options: options,
                 remoteIPAURL: uploadRemoteURL,
                 localIPAURL: uploadLocalIPA
             )
@@ -282,7 +294,7 @@ struct RemoteSigningService: SigningService {
         request.setValue(KeychainHelper.deviceID, forHTTPHeaderField: "X-XSign-Device")
 
         let baseFraction = tweakMode ? 0.55 : 0.3
-        let uploadDelegate = UploadProgressDelegate { fraction in
+        let uploadProgress = UploadProgressDelegate { fraction in
             let pct = Int((fraction * 100).rounded())
             emitter.update { p in
                 if let i = p.steps.firstIndex(where: { $0.kind == .sign }) { p.steps[i].state = .running(detail: "\(pct)%") }
@@ -292,9 +304,26 @@ struct RemoteSigningService: SigningService {
             emitter.log(L.tr("signlog.uploadProgress", pct), .detail)
         }
 
+        // Registro em disco: se o iOS encerrar o app no meio, o resultado não se perde.
+        let jobID = UUID().uuidString
+        PendingSignStore.save(PendingSignJob(
+            jobID: jobID,
+            app: app,
+            certificateID: certificate.id,
+            options: options,
+            bodyPath: bodyURL.path
+        ))
+        defer { PendingSignStore.remove(jobID) }
+
         do {
-            let (respData, urlResponse) = try await URLSession.shared.upload(for: request, fromFile: bodyURL, delegate: uploadDelegate)
-            let httpStatus = (urlResponse as? HTTPURLResponse)?.statusCode ?? 500
+            let (respData, urlResponse) = try await SignUploadSession.shared.upload(
+                request,
+                fromFile: bodyURL,
+                jobID: jobID
+            ) { sent, expected in
+                uploadProgress.report(sent: sent, expected: expected)
+            }
+            let httpStatus = urlResponse.statusCode
 
             guard (200...299).contains(httpStatus) else {
                 let serverMsg = (try? JSONDecoder().decode(RemoteErrorResponse.self, from: respData))?.error
@@ -302,6 +331,7 @@ struct RemoteSigningService: SigningService {
                     ?? "HTTP \(httpStatus)"
                 emitter.log(L.tr("signlog.serverStatus", httpStatus), .detail)
                 emitter.fail(.sign, serverMsg)
+                await notifyIfInBackground(failure: serverMsg, name: customName)
                 return
             }
 
@@ -328,16 +358,44 @@ struct RemoteSigningService: SigningService {
                 p.finalName = decoded.appName
                 p.finalBundleID = decoded.bundleIdentifier
                 p.finalVersion = decoded.bundleVersion
+                p.expiresAt = decoded.expiresAt.flatMap(parseServerDate)
                 if let size = decoded.fileSize { p.fileSize = size }
             }
             emitter.finish()
+            await notifyIfInBackground(signed: decoded)
         } catch is CancellationError {
             emitter.finish()
         } catch let error as URLError where error.code == .cancelled {
             emitter.finish()
         } catch {
-            emitter.fail(.sign, L.tr("signlog.error.connection", error.localizedDescription))
+            let message = L.tr("signlog.error.connection", error.localizedDescription)
+            emitter.fail(.sign, message)
+            await notifyIfInBackground(failure: message, name: customName)
         }
+    }
+
+    // MARK: Notificação com o app fora da tela
+
+    private static func isAppActive() async -> Bool {
+        await MainActor.run { UIApplication.shared.applicationState == .active }
+    }
+
+    private static func notifyIfInBackground(signed decoded: RemoteSignResponse) async {
+        let active = await isAppActive()
+        guard !active else { return }
+        SignNotifier.notifySigned(name: decoded.appName, installURL: decoded.installUrl, bundleID: decoded.bundleIdentifier)
+    }
+
+    private static func notifyIfInBackground(failure message: String, name: String) async {
+        let active = await isAppActive()
+        guard !active else { return }
+        SignNotifier.notifyFailed(name: name, message: message)
+    }
+
+    static func parseServerDate(_ text: String) -> Date? {
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return withFraction.date(from: text) ?? ISO8601DateFormatter().date(from: text)
     }
 
     // MARK: Auxiliares
@@ -386,6 +444,8 @@ struct RemoteSigningService: SigningService {
         customName: String,
         customBundleID: String,
         customVersion: String,
+        applyVersion: Bool,
+        options: SignOptions,
         remoteIPAURL: URL?,
         localIPAURL: URL?
     ) throws {
@@ -420,6 +480,18 @@ struct RemoteSigningService: SigningService {
         try appendField(name: "customName", value: customName)
         try appendField(name: "customBundleId", value: customBundleID)
         try appendField(name: "customVersion", value: customVersion)
+        if applyVersion { try appendField(name: "applyVersion", value: "true") }
+
+        // Opções aplicadas pelo zsign no servidor.
+        try appendField(name: "removeExtensions", value: options.removeExtensions ? "true" : "false")
+        try appendField(name: "removeDeviceRestriction", value: options.removeDeviceRestriction ? "true" : "false")
+        try appendField(name: "fileSharing", value: options.fileSharing ? "true" : "false")
+        if let minOS = options.minOS?.trimmingCharacters(in: .whitespacesAndNewlines), !minOS.isEmpty {
+            try appendField(name: "minOS", value: minOS)
+        }
+        if let icon = options.iconData, icon.starts(with: [0x89, 0x50, 0x4E, 0x47]) {
+            try appendFileData(name: "icon", filename: "icon.png", mimeType: "image/png", data: icon)
+        }
 
         if let p12Data, !p12Data.isEmpty {
             try appendFileData(name: "p12", filename: "certificate.p12", mimeType: "application/x-pkcs12", data: p12Data)
@@ -467,6 +539,11 @@ final class UploadProgressDelegate: NSObject, URLSessionTaskDelegate {
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64,
                     totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        report(sent: totalBytesSent, expected: totalBytesExpectedToSend)
+    }
+
+    /// Throttle do progresso (também usado pela sessão em segundo plano).
+    func report(sent totalBytesSent: Int64, expected totalBytesExpectedToSend: Int64) {
         guard totalBytesExpectedToSend > 0 else { return }
         let fraction = min(1, Double(totalBytesSent) / Double(totalBytesExpectedToSend))
         let now = CFAbsoluteTimeGetCurrent()

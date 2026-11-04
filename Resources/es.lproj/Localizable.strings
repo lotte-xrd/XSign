@@ -251,6 +251,19 @@
 "update.now" = "Actualizar ahora";
 "update.later" = "Más tarde";
 "update.upToDate" = "XSign está actualizado (%@).";
+"update.closing" = "Instalando la actualización. XSign se cerrará…";
+"notify.sign.done.title" = "Firma completada";
+"notify.sign.done.install" = "%@ está listo. Toca para instalar.";
+"notify.sign.done.body" = "%@ está listo en la pestaña Firmados.";
+"notify.sign.failed.title" = "Error al firmar";
+"notify.sign.failed.body" = "%@: %@";
+"renew.hud" = "Renovando el enlace de instalación…";
+"renew.noSource" = "El enlace de instalación caducó y el archivo original ya no está en el dispositivo. Firma la app de nuevo.";
+"renew.failed" = "No se pudo renovar el enlace de instalación.";
+"cert.appleRevoked" = "Revocado por Apple";
+"cert.appleRevokedOn" = "Revocado por Apple el %@";
+"revoked.alert.title" = "Certificado revocado por Apple";
+"revoked.alert.body" = "%@. Las apps firmadas con él solo abren si el iPhone bloquea la verificación de Apple (OCSP). Aún puedes firmar con él.";
 "loading.hud.checkingUpdate" = "Buscando actualizaciones…";
 
 /* Novedades: tweaks, lotes, registro, archivos, descargas */

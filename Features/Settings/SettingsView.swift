@@ -165,7 +165,16 @@ struct CertificateCard: View {
                 StatusBadge(status: cert.status)
             }
             Text("\(cert.type) · \(cert.teamID)").font(.caption2.monospaced()).foregroundStyle(.secondary)
-            SignatureLine(progress: cert.validityFraction, warning: cert.status == .expiring)
+            if cert.isRevokedByApple {
+                Label(
+                    cert.appleRevokedAt.map { L.tr("cert.appleRevokedOn", $0.formatted(date: .abbreviated, time: .omitted)) }
+                        ?? L.tr("cert.appleRevoked"),
+                    systemImage: "exclamationmark.shield"
+                )
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color.brick)
+            }
+            SignatureLine(progress: cert.validityFraction, warning: cert.status == .expiring || cert.isRevokedByApple)
             if let exp = cert.expiresAt {
                 HStack {
                     Text(L.tr("cert.expiresOn", exp.formatted(date: .abbreviated, time: .omitted)))

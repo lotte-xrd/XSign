@@ -66,6 +66,8 @@ final class AppState: ObservableObject {
     @Published var activeHUDTitle: String? = nil
     @Published var availableUpdate: AppUpdateInfo? = nil
     @Published var selfUpdateTarget: AppItem? = nil
+    /// Aviso de certificado revogado pela Apple (mostrado uma vez por revogação).
+    @Published var revocationAlert: String? = nil
 
     /// Versão publicada no link "latest" (vem da checagem de atualização).
     private var latestRemoteVersion: String?
@@ -200,7 +202,10 @@ final class AppState: ObservableObject {
         }
 
         startHeartbeatLoop()
+        importFinishedBackgroundSigns()
+        resumePendingInstallIfNeeded()
         Task { _ = await checkForAppUpdate(manual: false) }
+        Task { await refreshAppleRevocation(force: false) }
 
         // Atualiza todas as fontes cadastradas em segundo plano
         if !sources.isEmpty {
@@ -287,7 +292,7 @@ final class AppState: ObservableObject {
         // 1) Se o servidor já devolveu um link OTA itms-services:// pré-assinado com o mesmo certificado
         if let directOTA = info.installUrl, !directOTA.isEmpty {
             Task {
-                try? await installService.openInstallURL(directOTA)
+                try? await openInstall(directOTA, bundleID: Bundle.main.bundleIdentifier)
             }
             return
         }
@@ -311,6 +316,197 @@ final class AppState: ObservableObject {
             origin: "XSign Auto-Update"
         )
         selfUpdateTarget = target
+    }
+
+    // MARK: - Fechar o app para a atualização entrar
+
+    /// O iOS só troca o XSign por uma versão nova com o app fechado. Quando o
+    /// link aberto instala o próprio XSign, o app fecha sozinho assim que a
+    /// pessoa responde ao pedido de instalação do iOS.
+    private var exitArmedForUpdate = false
+
+    /// Instalação que ficou para quando o app voltar para a tela (o iOS não
+    /// abre o pedido de instalação com o app em segundo plano).
+    private var pendingInstall: (url: String, bundleID: String?)?
+
+    /// Abre um link itms-services://; se for o próprio XSign, prepara o fechamento.
+    func openInstall(_ installURL: String, bundleID: String?) async throws {
+        guard UIApplication.shared.applicationState == .active else {
+            pendingInstall = (installURL, bundleID)
+            return
+        }
+        let isSelf = bundleID != nil && bundleID == Bundle.main.bundleIdentifier
+        if isSelf { exitArmedForUpdate = true }
+        do {
+            try await installService.openInstallURL(installURL)
+        } catch {
+            if isSelf { exitArmedForUpdate = false }
+            throw error
+        }
+    }
+
+    /// Ao voltar para a tela: instala o que ficou pendente ou o que veio de uma
+    /// notificação tocada.
+    func resumePendingInstallIfNeeded() {
+        if let tapped = PendingNotificationAction.takeInstall() {
+            pendingInstall = tapped
+        }
+        guard let next = pendingInstall, UIApplication.shared.applicationState == .active else { return }
+        pendingInstall = nil
+        Task { try? await openInstall(next.url, bundleID: next.bundleID) }
+    }
+
+    /// Chamado quando a cena volta a ficar ativa (o pedido de instalação sumiu)
+    /// ou vai para o segundo plano.
+    func closeForUpdateIfArmed(immediately: Bool) {
+        guard exitArmedForUpdate else { return }
+        exitArmedForUpdate = false
+        if immediately {
+            exit(0)
+        }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            activeHUDTitle = L.tr("update.closing")
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            // Vai para a tela inicial, como o botão de início, e encerra o processo.
+            UIApplication.shared.perform(#selector(NSXPCConnection.suspend))
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            exit(0)
+        }
+    }
+
+    // MARK: - Instalar um app assinado (renova o link vencido sozinho)
+
+    /// Instala um app da aba Assinados. Se o link do servidor venceu (24 h) ou
+    /// sumiu, assina de novo com as mesmas opções e instala, sem pedir nada.
+    func installSigned(_ item: AppItem) async throws {
+        if let url = item.installURL, !url.isEmpty, await installLinkIsAlive(item) {
+            try await openInstall(url, bundleID: item.bundleID)
+            return
+        }
+        try await renewAndInstall(item)
+    }
+
+    private func installLinkIsAlive(_ item: AppItem) async -> Bool {
+        if let expiresAt = item.expiresAt, expiresAt.timeIntervalSinceNow < 120 { return false }
+        guard let manifest = Self.manifestURL(fromInstallURL: item.installURL) else { return true }
+        var request = URLRequest(url: manifest, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
+        request.setValue("XSign/1.0 (iOS)", forHTTPHeaderField: "User-Agent")
+        guard let (_, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse else {
+            return true // sem rede: tenta o link mesmo assim
+        }
+        return (200...299).contains(http.statusCode)
+    }
+
+    private static func manifestURL(fromInstallURL installURL: String?) -> URL? {
+        guard let installURL,
+              let components = URLComponents(string: installURL),
+              let raw = components.queryItems?.first(where: { $0.name == "url" })?.value else { return nil }
+        return URL(string: raw)
+    }
+
+    /// De onde reassinar um item: o .ipa original no aparelho ou o link de origem.
+    func signingInput(for item: AppItem) -> AppItem {
+        guard item.state == .signed else { return item }
+        var input = item
+        if let source = item.sourcePath, !source.isEmpty,
+           FileManager.default.fileExists(atPath: Paths.resolve(source).path) {
+            input.filePath = source
+        } else {
+            input.filePath = ""
+        }
+        input.downloadURL = item.sourceURL ?? item.downloadURL
+        return input
+    }
+
+    private func renewAndInstall(_ item: AppItem) async throws {
+        let input = signingInput(for: item)
+        guard !input.filePath.isEmpty || input.downloadURL != nil else {
+            throw Self.appError(L.tr("renew.noSource"))
+        }
+        guard let certificate = certificates.first(where: { $0.id == item.certificateID }) ?? currentCertificate else {
+            throw Self.appError(L.tr("sign.noCert"))
+        }
+        let options = item.signOptions ?? SignOptions(name: item.name, bundleID: item.bundleID, version: item.version)
+
+        withAnimation(.easeInOut(duration: 0.2)) { activeHUDTitle = L.tr("renew.hud") }
+        var last: SignProgress?
+        for await update in signingService.sign(app: input, certificate: certificate, options: options) {
+            last = update
+        }
+        withAnimation(.easeInOut(duration: 0.2)) { activeHUDTitle = nil }
+
+        guard let done = last, done.finished, let installURL = done.installURL else {
+            throw Self.appError(last?.error ?? L.tr("renew.failed"))
+        }
+        if let i = apps.firstIndex(where: { $0.id == item.id }) {
+            apps[i].installURL = done.installURL
+            apps[i].signedDownloadURL = done.downloadURL
+            apps[i].shareURL = done.shareURL
+            apps[i].expiresAt = done.expiresAt
+            apps[i].filePath = done.outputPath ?? apps[i].filePath
+            apps[i].signedAt = Date()
+            persist()
+        }
+        try await openInstall(installURL, bundleID: done.finalBundleID ?? item.bundleID)
+    }
+
+    private static func appError(_ message: String) -> NSError {
+        NSError(domain: "XSign", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+    }
+
+    // MARK: - Assinaturas que terminaram com o app fechado
+
+    /// O iOS pode encerrar o XSign enquanto o servidor assina. A resposta fica
+    /// salva em disco e o app entra na aba Assinados na próxima abertura.
+    func importFinishedBackgroundSigns() {
+        for job in PendingSignStore.takeFinished() {
+            guard let data = job.resultData,
+                  let decoded = try? JSONDecoder().decode(RemoteSigningService.RemoteSignResponse.self, from: data),
+                  let certificate = certificates.first(where: { $0.id == job.certificateID }) ?? currentCertificate
+            else { continue }
+            var progress = SignProgress(steps: [], fraction: 1)
+            progress.finished = true
+            progress.outputPath = decoded.downloadUrl
+            progress.installURL = decoded.installUrl
+            progress.downloadURL = decoded.downloadUrl
+            progress.shareURL = decoded.shareUrl
+            progress.finalName = decoded.appName
+            progress.finalBundleID = decoded.bundleIdentifier
+            progress.finalVersion = decoded.bundleVersion
+            progress.fileSize = decoded.fileSize
+            progress.expiresAt = decoded.expiresAt.flatMap(RemoteSigningService.parseServerDate)
+            registerSigned(original: job.app, certificate: certificate, options: job.options, progress: progress)
+        }
+    }
+
+    // MARK: - Revogação pela Apple (OCSP)
+
+    /// Consulta a Apple (pelo servidor) e avisa uma vez quando um certificado
+    /// aparece revogado. Só informa: a assinatura continua liberada.
+    func refreshAppleRevocation(force: Bool) async {
+        let base = settings.serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/+$", with: "", options: .regularExpression)
+        var newlyRevoked: [String] = []
+        for cert in certificates {
+            if !force, let last = cert.appleCheckedAt, Date().timeIntervalSince(last) < 6 * 60 * 60 { continue }
+            guard let result = await certificateService.appleRevocationStatus(for: cert, serverBase: base),
+                  let i = certificates.firstIndex(where: { $0.id == cert.id }) else { continue }
+            let wasRevoked = certificates[i].isRevokedByApple
+            certificates[i].appleStatus = result.status
+            certificates[i].appleRevokedAt = result.revokedAt
+            certificates[i].appleCheckedAt = Date()
+            if result.status == "revoked" && !wasRevoked {
+                let since = result.revokedAt?.formatted(date: .abbreviated, time: .omitted)
+                newlyRevoked.append(since.map { "\(cert.nickname) (\($0))" } ?? cert.nickname)
+            }
+        }
+        persist()
+        if !newlyRevoked.isEmpty {
+            revocationAlert = L.tr("revoked.alert.body", newlyRevoked.joined(separator: ", "))
+        }
     }
 
     private static func isNewerVersion(remoteVersion: String, remoteBuild: String?, localVersion: String, localBuild: String) -> Bool {
@@ -669,6 +865,16 @@ final class AppState: ObservableObject {
         signed.name = progress.finalName ?? options.name ?? app.name
         signed.bundleID = progress.finalBundleID ?? options.bundleID ?? app.bundleID
         signed.version = progress.finalVersion ?? options.version ?? app.version
+        signed.expiresAt = progress.expiresAt
+        signed.signOptions = options
+        if app.state == .unsigned {
+            let isLocal = !app.filePath.isEmpty && !app.filePath.hasPrefix("http")
+            signed.sourcePath = isLocal ? app.filePath : nil
+            signed.sourceURL = app.downloadURL
+        } else {
+            signed.sourcePath = app.sourcePath ?? ((!app.filePath.isEmpty && !app.filePath.hasPrefix("http")) ? app.filePath : nil)
+            signed.sourceURL = app.sourceURL ?? app.downloadURL
+        }
         if let fSize = progress.fileSize, fSize > 0 {
             signed.size = fSize
         }

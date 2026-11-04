@@ -235,6 +235,6 @@ struct BulkSignView: View {
 
     private func install(_ item: AppItem) {
         guard let url = item.installURL else { return }
-        Task { try? await appState.installService.openInstallURL(url) }
+        Task { try? await appState.openInstall(url, bundleID: item.bundleID) }
     }
 }

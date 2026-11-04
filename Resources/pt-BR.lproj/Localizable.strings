@@ -251,6 +251,19 @@
 "update.now" = "Atualizar agora";
 "update.later" = "Depois";
 "update.upToDate" = "O XSign já está na versão mais recente (%@).";
+"update.closing" = "Instalando a atualização. O XSign vai fechar…";
+"notify.sign.done.title" = "Assinatura concluída";
+"notify.sign.done.install" = "%@ está pronto. Toque para instalar.";
+"notify.sign.done.body" = "%@ está pronto na aba Assinados.";
+"notify.sign.failed.title" = "Falha na assinatura";
+"notify.sign.failed.body" = "%@: %@";
+"renew.hud" = "Renovando o link de instalação…";
+"renew.noSource" = "O link de instalação venceu e o arquivo original não está mais no aparelho. Assine o app de novo.";
+"renew.failed" = "Não foi possível renovar o link de instalação.";
+"cert.appleRevoked" = "Revogado pela Apple";
+"cert.appleRevokedOn" = "Revogado pela Apple em %@";
+"revoked.alert.title" = "Certificado revogado pela Apple";
+"revoked.alert.body" = "%@. Os apps assinados com ele só abrem se o iPhone estiver bloqueando a checagem da Apple (OCSP). Você ainda pode assinar com ele.";
 "loading.hud.checkingUpdate" = "Verificando atualizações…";
 
 /* Novidades: tweaks, lote, log, arquivos, downloads */

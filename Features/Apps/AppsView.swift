@@ -240,7 +240,7 @@ struct AppsView: View {
             Button(L.tr("appinfo.title")) { infoTarget = item }
             Button(L.tr("apps.action.share")) { shareApp(item) }
             Button(L.tr("apps.action.resign")) {
-                var target = item
+                var target = app.signingInput(for: item)
                 if app.isOfficialPlaceholder(item) { target.version = app.latestXSignVersion }
                 signTarget = target
             }
@@ -263,16 +263,8 @@ struct AppsView: View {
         }
         Task {
             do {
-                if let installURL = item.installURL, !installURL.isEmpty {
-                    try await app.installService.openInstallURL(installURL)
-                } else {
-                    try await app.installService.install(
-                        ipaPath: item.filePath,
-                        bundleID: item.bundleID,
-                        version: item.version,
-                        title: item.name
-                    )
-                }
+                // Renova sozinho o link do servidor quando ele já venceu.
+                try await app.installSigned(item)
             } catch {
                 errorAlertMessage = error.localizedDescription
             }

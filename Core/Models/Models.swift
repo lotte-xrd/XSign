@@ -110,6 +110,11 @@ struct AppItem: Identifiable, Codable, Hashable {
     var shareURL: String? = nil
     /// Data de expiração do link OTA no servidor
     var expiresAt: Date? = nil
+    /// Opções usadas na assinatura (para renovar o link vencido do mesmo jeito)
+    var signOptions: SignOptions? = nil
+    /// .ipa original no aparelho (caminho relativo) e/ou link de onde ele veio
+    var sourcePath: String? = nil
+    var sourceURL: URL? = nil
 }
 
 // MARK: - Certificado
@@ -157,6 +162,13 @@ struct Certificate: Identifiable, Codable, Hashable {
     var status: CertStatus = .unknown
     var checkedAt: Date?
     var inUse: Bool = false
+    /// Resposta da Apple (OCSP): "good", "revoked" ou "unknown". Só informa;
+    /// não bloqueia a assinatura.
+    var appleStatus: String? = nil
+    var appleRevokedAt: Date? = nil
+    var appleCheckedAt: Date? = nil
+
+    var isRevokedByApple: Bool { appleStatus == "revoked" }
 
     /// Validade combinada (a menor entre certificado e perfil é gravada em expiresAt).
     var daysLeft: Int? {
@@ -228,6 +240,8 @@ struct SignProgress: Equatable {
     var finalBundleID: String?
     var finalVersion: String?
     var fileSize: Int64?
+    /// Validade do link de instalação no servidor.
+    var expiresAt: Date?
     var error: String?
     /// Linhas do log mostradas ao vivo na tela de assinatura.
     var log: [SignLogLine] = []

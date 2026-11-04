@@ -154,7 +154,10 @@ struct SignProgressView: View {
     private func install() {
         Task {
             if let installURL = progress.installURL {
-                try? await appState.installService.openInstallURL(installURL)
+                try? await appState.openInstall(
+                    installURL,
+                    bundleID: progress.finalBundleID ?? options.bundleID ?? app.bundleID
+                )
             } else {
                 try? await appState.installService.install(
                     ipaPath: progress.outputPath ?? app.filePath,

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 struct SignView: View {
@@ -126,7 +127,8 @@ struct SignView: View {
                     let scoped = url.startAccessingSecurityScopedResource()
                     defer { if scoped { url.stopAccessingSecurityScopedResource() } }
                     if let d = try? Data(contentsOf: url) {
-                        options.iconData = d
+                        // O zsign do servidor espera um PNG quadrado.
+                        options.iconData = AppIconRenderer.png(from: d) ?? d
                     }
                 }
             }
@@ -146,6 +148,27 @@ struct SignView: View {
         o.bundleID = bundleID
         o.version = version
         return o
+    }
+}
+
+/// Converte a imagem escolhida em ícone de app: PNG 512×512, quadrado e sem
+/// transparência (o iOS mostra fundo preto em ícone com alfa).
+enum AppIconRenderer {
+    static func png(from data: Data) -> Data? {
+        guard let image = UIImage(data: data), image.size.width > 0, image.size.height > 0 else { return nil }
+        let side: CGFloat = 512
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+        let rendered = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+            let scale = max(side / image.size.width, side / image.size.height)
+            let width = image.size.width * scale
+            let height = image.size.height * scale
+            image.draw(in: CGRect(x: (side - width) / 2, y: (side - height) / 2, width: width, height: height))
+        }
+        return rendered.pngData()
     }
 }
 
