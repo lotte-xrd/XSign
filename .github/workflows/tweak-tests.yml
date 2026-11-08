@@ -80,7 +80,8 @@ jobs:
 
       - name: Injetar e executar
         run: |
-          set -uo pipefail
+          # Sem -e aqui: o erro do bloco abaixo vira anotação antes de sair.
+          set +e -uo pipefail
           LOG="$RUNNER_TEMP/inject.log"
           (
             set -euo pipefail
