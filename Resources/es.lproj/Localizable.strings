@@ -96,9 +96,11 @@
 "sign.step.extract" = "Extraer paquete";
 "sign.step.modify" = "Aplicar cambios";
 "sign.step.inject" = "Inyectar tweaks";
-"sign.step.sign" = "Firmar binarios";
+"sign.step.sign" = "Firmar en el servidor";
 "sign.step.pack" = "Reempaquetar";
 "sign.step.install" = "Instalar";
+"sign.step.prepare" = "Preparar certificado";
+"sign.step.upload" = "Enviar al servidor";
 
 /* Archivos */
 "files.folders" = "Carpetas";
@@ -305,6 +307,25 @@
 "signlog.otaReady" = "Enlace de instalación OTA listo";
 "signlog.linkValid" = "El enlace es válido por %ld h";
 "signlog.error.connection" = "No se pudo conectar con el servidor de firma: %@";
+"sign.detail.preparing" = "preparando";
+"sign.detail.queued" = "en cola";
+"sign.detail.queuePosition" = "%ldº en la cola";
+"sign.detail.downloading" = "descargando · %ld s";
+"sign.detail.seconds" = "%ld s";
+"signlog.upload.parts" = "Enviando %@ en %ld partes…";
+"signlog.upload.done" = "Archivo enviado: %@ en %@ s";
+"signlog.upload.retry" = "La parte %ld falló (%@). Reintentando…";
+"signlog.server.queued" = "Servidor ocupado: tu firma está en la cola";
+"signlog.server.downloading" = "El servidor está descargando el .ipa de la fuente…";
+"signlog.server.signing" = "El servidor está firmando la app…";
+"signlog.server.retrying" = "Conexión inestable. Consultando el servidor de nuevo…";
+"signlog.error.tooLarge" = "El servidor rechazó el archivo por ser demasiado grande (HTTP 413).";
+"signlog.error.busy" = "El servidor está ocupado ahora. Inténtalo de nuevo en unos minutos.";
+"signlog.error.serverDown" = "El servidor de firma no respondió (HTTP %ld). Inténtalo de nuevo en unos minutos.";
+"signlog.error.http" = "El servidor respondió con un error (HTTP %ld).";
+"signlog.error.badResponse" = "El servidor envió una respuesta inválida. Inténtalo de nuevo.";
+"signlog.error.chunk" = "No se pudo enviar la parte %ld: %@";
+"signlog.error.chunksMissing" = "Algunas partes del archivo no llegaron al servidor. Intenta firmar de nuevo.";
 "tweak.error.noExecutable" = "No se encontró el ejecutable principal de la app.";
 "tweak.error.nothing" = "Los tweaks elegidos no tienen ninguna dylib para inyectar.";
 "tweak.log.missing" = "Archivo no encontrado: %@";

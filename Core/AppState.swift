@@ -464,22 +464,48 @@ final class AppState: ObservableObject {
     func importFinishedBackgroundSigns() {
         for job in PendingSignStore.takeFinished() {
             guard let data = job.resultData,
-                  let decoded = try? JSONDecoder().decode(RemoteSigningService.RemoteSignResponse.self, from: data),
-                  let certificate = certificates.first(where: { $0.id == job.certificateID }) ?? currentCertificate
+                  let decoded = try? JSONDecoder().decode(RemoteSigningService.RemoteSignResponse.self, from: data)
             else { continue }
-            var progress = SignProgress(steps: [], fraction: 1)
-            progress.finished = true
-            progress.outputPath = decoded.downloadUrl
-            progress.installURL = decoded.installUrl
-            progress.downloadURL = decoded.downloadUrl
-            progress.shareURL = decoded.shareUrl
-            progress.finalName = decoded.appName
-            progress.finalBundleID = decoded.bundleIdentifier
-            progress.finalVersion = decoded.bundleVersion
-            progress.fileSize = decoded.fileSize
-            progress.expiresAt = decoded.expiresAt.flatMap(RemoteSigningService.parseServerDate)
-            registerSigned(original: job.app, certificate: certificate, options: job.options, progress: progress)
+            registerBackgroundResult(decoded, job: job)
         }
+        Task { await resumeServerSignJobs() }
+    }
+
+    /// Envios em partes que o iOS interrompeu fechando o app: as partes já na
+    /// fila continuam subindo e o servidor assina sozinho. Aqui o resultado é
+    /// buscado no servidor e o app entra na aba Assinados.
+    private func resumeServerSignJobs() async {
+        for job in PendingSignStore.serverJobsToResume() {
+            guard let jobID = job.serverJobID, let base = job.serverBase else { continue }
+            let state = await RemoteSigningService.fetchJobState(base: base, jobID: jobID)
+            switch state {
+            case .done(let decoded):
+                // Pode já ter sido registrado por outra ativação do app.
+                guard PendingSignStore.load(job.jobID) != nil else { continue }
+                PendingSignStore.remove(job.jobID)
+                registerBackgroundResult(decoded, job: job)
+            case .gone:
+                PendingSignStore.remove(job.jobID)
+            case .pending:
+                continue
+            }
+        }
+    }
+
+    private func registerBackgroundResult(_ decoded: RemoteSigningService.RemoteSignResponse, job: PendingSignJob) {
+        guard let certificate = certificates.first(where: { $0.id == job.certificateID }) ?? currentCertificate else { return }
+        var progress = SignProgress(steps: [], fraction: 1)
+        progress.finished = true
+        progress.outputPath = decoded.downloadUrl
+        progress.installURL = decoded.installUrl
+        progress.downloadURL = decoded.downloadUrl
+        progress.shareURL = decoded.shareUrl
+        progress.finalName = decoded.appName
+        progress.finalBundleID = decoded.bundleIdentifier
+        progress.finalVersion = decoded.bundleVersion
+        progress.fileSize = decoded.fileSize
+        progress.expiresAt = decoded.expiresAt.flatMap(RemoteSigningService.parseServerDate)
+        registerSigned(original: job.app, certificate: certificate, options: job.options, progress: progress)
     }
 
     // MARK: - Revogação pela Apple (OCSP)

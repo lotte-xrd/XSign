@@ -1,6 +1,6 @@
 {
-  "version": "1.2.0",
-  "build": "4",
+  "version": "1.3.0",
+  "build": "5",
   "ipaUrl": "https://github.com/lotte-xrd/XSign/releases/download/latest/XSign-unsigned.ipa",
-  "notes": "XSign 1.2.0: a assinatura continua com o app em segundo plano e avisa por notificação (toque para instalar); o link de instalação vencido é renovado sozinho; ícone, remover extensões, remover restrição de aparelho e compartilhamento de arquivos agora funcionam de verdade; aviso quando a Apple revoga o certificado; e o XSign fecha sozinho ao atualizar para a versão nova entrar."
+  "notes": "XSign 1.3.0: apps grandes (acima de 100 MB) agora assinam: o .ipa sobe em partes e não dá mais o erro 413; a barra de progresso mostra o que acontece de verdade (envio, fila, download e assinatura no servidor, com o tempo) em vez de pular para 100%; erros do servidor aparecem como mensagem clara em vez de página HTML; e assinaturas que demoram mais de 100 s não caem mais no meio."
 }

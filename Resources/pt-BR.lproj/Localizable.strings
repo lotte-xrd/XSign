@@ -96,9 +96,11 @@
 "sign.step.extract" = "Extrair pacote";
 "sign.step.modify" = "Aplicar alterações";
 "sign.step.inject" = "Injetar tweaks";
-"sign.step.sign" = "Assinar binários";
+"sign.step.sign" = "Assinar no servidor";
 "sign.step.pack" = "Empacotar";
 "sign.step.install" = "Instalar";
+"sign.step.prepare" = "Preparar certificado";
+"sign.step.upload" = "Enviar ao servidor";
 
 /* Arquivos */
 "files.folders" = "Pastas";
@@ -305,6 +307,25 @@
 "signlog.otaReady" = "Link de instalação OTA pronto";
 "signlog.linkValid" = "O link vale por %ld h";
 "signlog.error.connection" = "Falha de conexão com o servidor de assinatura: %@";
+"sign.detail.preparing" = "preparando";
+"sign.detail.queued" = "na fila";
+"sign.detail.queuePosition" = "%ldº na fila";
+"sign.detail.downloading" = "baixando · %ld s";
+"sign.detail.seconds" = "%ld s";
+"signlog.upload.parts" = "Enviando %@ em %ld partes…";
+"signlog.upload.done" = "Arquivo enviado: %@ em %@ s";
+"signlog.upload.retry" = "A parte %ld falhou (%@). Tentando de novo…";
+"signlog.server.queued" = "Servidor ocupado: sua assinatura está na fila";
+"signlog.server.downloading" = "O servidor está baixando o .ipa da fonte…";
+"signlog.server.signing" = "O servidor está assinando o app…";
+"signlog.server.retrying" = "Conexão instável. Consultando o servidor de novo…";
+"signlog.error.tooLarge" = "O servidor recusou o arquivo por ser grande demais (HTTP 413).";
+"signlog.error.busy" = "O servidor está ocupado agora. Tente de novo em alguns minutos.";
+"signlog.error.serverDown" = "O servidor de assinatura não respondeu (HTTP %ld). Tente de novo em alguns minutos.";
+"signlog.error.http" = "O servidor respondeu com um erro (HTTP %ld).";
+"signlog.error.badResponse" = "O servidor mandou uma resposta inválida. Tente de novo.";
+"signlog.error.chunk" = "Não foi possível enviar a parte %ld: %@";
+"signlog.error.chunksMissing" = "Algumas partes do arquivo não chegaram ao servidor. Tente assinar de novo.";
 "tweak.error.noExecutable" = "Não encontrei o executável principal do app.";
 "tweak.error.nothing" = "Nenhuma dylib para injetar nos tweaks escolhidos.";
 "tweak.log.missing" = "Arquivo não encontrado: %@";

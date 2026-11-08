@@ -205,10 +205,12 @@ struct SignOptions: Codable, Hashable {
 }
 
 enum SignStepKind: String, Codable, CaseIterable {
-    case extract, modify, inject, sign, pack, install
+    case prepare, extract, modify, inject, pack, upload, sign, install
 
     var label: String {
         switch self {
+        case .prepare: return L.tr("sign.step.prepare")
+        case .upload:  return L.tr("sign.step.upload")
         case .extract: return L.tr("sign.step.extract")
         case .modify:  return L.tr("sign.step.modify")
         case .inject:  return L.tr("sign.step.inject")

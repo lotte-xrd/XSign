@@ -96,9 +96,11 @@
 "sign.step.extract" = "Extract package";
 "sign.step.modify" = "Apply changes";
 "sign.step.inject" = "Inject tweaks";
-"sign.step.sign" = "Sign binaries";
+"sign.step.sign" = "Sign on server";
 "sign.step.pack" = "Repackage";
 "sign.step.install" = "Install";
+"sign.step.prepare" = "Prepare certificate";
+"sign.step.upload" = "Upload to server";
 
 /* Files */
 "files.folders" = "Folders";
@@ -305,6 +307,25 @@
 "signlog.otaReady" = "OTA install link ready";
 "signlog.linkValid" = "The link is valid for %ld h";
 "signlog.error.connection" = "Could not reach the signing server: %@";
+"sign.detail.preparing" = "preparing";
+"sign.detail.queued" = "queued";
+"sign.detail.queuePosition" = "#%ld in queue";
+"sign.detail.downloading" = "downloading · %ld s";
+"sign.detail.seconds" = "%ld s";
+"signlog.upload.parts" = "Uploading %@ in %ld parts…";
+"signlog.upload.done" = "File uploaded: %@ in %@ s";
+"signlog.upload.retry" = "Part %ld failed (%@). Retrying…";
+"signlog.server.queued" = "The server is busy: your signature is queued";
+"signlog.server.downloading" = "The server is downloading the .ipa from the source…";
+"signlog.server.signing" = "The server is signing the app…";
+"signlog.server.retrying" = "Unstable connection. Checking the server again…";
+"signlog.error.tooLarge" = "The server refused the file because it is too large (HTTP 413).";
+"signlog.error.busy" = "The server is busy right now. Try again in a few minutes.";
+"signlog.error.serverDown" = "The signing server did not respond (HTTP %ld). Try again in a few minutes.";
+"signlog.error.http" = "The server answered with an error (HTTP %ld).";
+"signlog.error.badResponse" = "The server sent an invalid answer. Try again.";
+"signlog.error.chunk" = "Could not upload part %ld: %@";
+"signlog.error.chunksMissing" = "Some parts of the file did not reach the server. Try signing again.";
 "tweak.error.noExecutable" = "Could not find the app's main executable.";
 "tweak.error.nothing" = "The selected tweaks have no dylib to inject.";
 "tweak.log.missing" = "File not found: %@";

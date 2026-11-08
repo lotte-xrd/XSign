@@ -102,6 +102,10 @@ seu perfil. O certificado fica só nos Secrets do seu repositório.
 - **Gerenciador de arquivos** (aba Arquivos ▸ Todos os arquivos): pastas, renomear,
   mover, duplicar, compactar/extrair, editor de texto, editor de plist, hex e Quick Look.
 - **Downloads em segundo plano**, com pausa/retomada e notificação ao terminar.
+- **Apps grandes**: o `.ipa` sobe em partes de 32 MB (o Cloudflare recusa pedidos
+  acima de 100 MB) e a tela mostra a etapa real no servidor: fila, download e
+  assinatura, com o tempo passando. O servidor assina em segundo plano, então
+  apps que levam mais de 100 s para assinar também funcionam.
 
 ### Testes
 

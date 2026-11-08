@@ -115,7 +115,9 @@ final class SignUploadSession: NSObject, URLSessionDataDelegate, @unchecked Send
         }
 
         // O app foi encerrado pelo iOS no meio do envio: termina pelo registro salvo.
-        guard let jobID = task.taskDescription else { return }
+        // Partes de um envio em partes não trazem o resultado (ele é consultado
+        // no servidor na próxima abertura).
+        guard let jobID = task.taskDescription, !jobID.hasPrefix("chunk:") else { return }
         let status = (task.response as? HTTPURLResponse)?.statusCode ?? 0
         PendingSignStore.completeOrphan(jobID: jobID, status: status, data: orphan ?? Data(), error: error)
     }
@@ -144,9 +146,43 @@ struct PendingSignJob: Codable {
     /// Preenchidos quando o servidor respondeu com o app fora da memória.
     var resultData: Data? = nil
     var errorMessage: String? = nil
+    /// Trabalho no servidor (envio em partes): o resultado é consultado lá.
+    var serverJobID: String? = nil
+    var serverBase: String? = nil
 }
 
 enum PendingSignStore {
+    // Assinaturas rodando agora neste processo (não são retomadas).
+    private static let liveLock = NSLock()
+    private static var live = Set<String>()
+
+    static func markLive(_ jobID: String) {
+        liveLock.lock()
+        live.insert(jobID)
+        liveLock.unlock()
+    }
+
+    static func unmarkLive(_ jobID: String) {
+        liveLock.lock()
+        live.remove(jobID)
+        liveLock.unlock()
+    }
+
+    private static func isLive(_ jobID: String) -> Bool {
+        liveLock.lock()
+        defer { liveLock.unlock() }
+        return live.contains(jobID)
+    }
+
+    /// Trabalhos no servidor deixados por uma abertura anterior do app.
+    static func serverJobsToResume() -> [PendingSignJob] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        return files
+            .filter { $0.pathExtension == "json" }
+            .compactMap { try? JSONDecoder().decode(PendingSignJob.self, from: Data(contentsOf: $0)) }
+            .filter { $0.serverJobID != nil && $0.resultData == nil && $0.errorMessage == nil && !isLive($0.jobID) }
+    }
+
     private static var folder: URL {
         let dir = Paths.documents.appendingPathComponent("PendingSigns", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -208,9 +244,8 @@ enum PendingSignStore {
                 bundleID: decoded.bundleIdentifier
             )
         } else {
-            let message = (try? JSONDecoder().decode(RemoteSigningService.RemoteErrorResponse.self, from: data))?.error
-                ?? error?.localizedDescription
-                ?? "HTTP \(status)"
+            let message = error?.localizedDescription
+                ?? RemoteSigningService.serverMessage(status: status, data: data)
             job.errorMessage = message
             save(job)
             SignNotifier.notifyFailed(name: name, message: message)
