@@ -30,6 +30,27 @@ jobs:
           set -euo pipefail
           W="$RUNNER_TEMP/w"; mkdir -p "$W"; cd "$W"
 
+          # O `ar` do macOS 26 só grava a tabela de símbolos (ignora arquivos que
+          # não são Mach-O), então os .deb são montados à mão. "bsd" usa nomes
+          # "#1/<n>" como o ar antigo do macOS; "plain" usa nomes curtos (dpkg/GNU).
+          mkdeb() {
+            style="$1"; out="$2"; shift 2
+            printf '!<arch>\n' > "$out"
+            for f in "$@"; do
+              name=$(basename "$f"); size=$(wc -c < "$f" | tr -d ' ')
+              if [ "$style" = bsd ]; then
+                total=$((size + ${#name}))
+                printf '%-16s%-12s%-6s%-6s%-8s%-10s`\n' "#1/${#name}" 0 0 0 100644 "$total" >> "$out"
+                printf '%s' "$name" >> "$out"
+              else
+                total=$size
+                printf '%-16s%-12s%-6s%-6s%-8s%-10s`\n' "$name" 0 0 0 100644 "$total" >> "$out"
+              fi
+              cat "$f" >> "$out"
+              if [ $((total % 2)) -eq 1 ]; then printf '\n' >> "$out"; fi
+            done
+          }
+
           # "Substrate" falso para macOS, com o install name do Substrate de jailbreak
           printf 'int MSHookFunction(void){return 42;}\n' > sub.c
           clang -dynamiclib sub.c -install_name /Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate -o CydiaSubstrate
@@ -63,13 +84,15 @@ jobs:
           cp TweakXZ.dylib debxz/root/Library/MobileSubstrate/DynamicLibraries/
           printf '{ Filter = { Bundles = ( "com.apple.UIKit" ); }; }' > debxz/root/Library/MobileSubstrate/DynamicLibraries/TweakXZ.plist
           (cd debxz/root && tar -cJf ../data.tar.xz .)
-          (cd debxz && echo "2.0" > debian-binary && printf 'Package: test.xz\n' > control && tar -czf control.tar.gz control && ar rc ../tweak-xz.deb debian-binary control.tar.gz data.tar.xz)
+          (cd debxz && echo "2.0" > debian-binary && printf 'Package: test.xz\n' > control && tar -czf control.tar.gz control)
+          mkdeb bsd tweak-xz.deb debxz/debian-binary debxz/control.tar.gz debxz/data.tar.xz
 
           # .deb com data.tar.gz (layout rootless)
           mkdir -p debgz/root/var/jb/usr/lib/TweakInject
           cp TweakGZ.dylib debgz/root/var/jb/usr/lib/TweakInject/
           (cd debgz/root && tar -czf ../data.tar.gz .)
-          (cd debgz && echo "2.0" > debian-binary && printf 'Package: test.gz\n' > control && tar -czf control.tar.gz control && ar rc ../tweak-gz.deb debian-binary control.tar.gz data.tar.gz)
+          (cd debgz && echo "2.0" > debian-binary && printf 'Package: test.gz\n' > control && tar -czf control.tar.gz control)
+          mkdeb plain tweak-gz.deb debgz/debian-binary debgz/control.tar.gz debgz/data.tar.gz
 
           # App de teste
           printf '#include <stdio.h>\nint main(void){ printf("APP_RUNNING\\n"); return 0; }\n' > main.c
@@ -86,9 +109,6 @@ jobs:
           (
             set -euo pipefail
             W="$RUNNER_TEMP/w"; cd "$W"
-            echo "--- ambiente"; sw_vers | paste -sd ' ' -; (ar --version 2>&1 || true) | head -1
-            echo "--- ar -t tweak-xz.deb"; ar -t tweak-xz.deb || true
-            xxd tweak-xz.deb | head -12
             "$RUNNER_TEMP/tweaksmoke" "$W/Fake.dir" "$W/tweak-xz.deb" "$W/tweak-gz.deb" "$W/Loose.dylib"
 
             echo "--- load commands do app"
