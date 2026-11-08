@@ -86,8 +86,7 @@ jobs:
           (
             set -euo pipefail
             W="$RUNNER_TEMP/w"; cd "$W"
-            echo "--- ambiente"; sw_vers | tr '
-' ' '; echo; (ar --version 2>&1 || true) | head -1
+            echo "--- ambiente"; sw_vers | paste -sd ' ' -; (ar --version 2>&1 || true) | head -1
             echo "--- ar -t tweak-xz.deb"; ar -t tweak-xz.deb || true
             xxd tweak-xz.deb | head -12
             "$RUNNER_TEMP/tweaksmoke" "$W/Fake.dir" "$W/tweak-xz.deb" "$W/tweak-gz.deb" "$W/Loose.dylib"
