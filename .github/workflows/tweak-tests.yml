@@ -80,28 +80,38 @@ jobs:
 
       - name: Injetar e executar
         run: |
-          set -euo pipefail
-          W="$RUNNER_TEMP/w"; cd "$W"
-          "$RUNNER_TEMP/tweaksmoke" "$W/Fake.dir" "$W/tweak-xz.deb" "$W/tweak-gz.deb" "$W/Loose.dylib"
+          set -uo pipefail
+          LOG="$RUNNER_TEMP/inject.log"
+          (
+            set -euo pipefail
+            W="$RUNNER_TEMP/w"; cd "$W"
+            "$RUNNER_TEMP/tweaksmoke" "$W/Fake.dir" "$W/tweak-xz.deb" "$W/tweak-gz.deb" "$W/Loose.dylib"
 
-          echo "--- load commands do app"
-          otool -L Fake.dir/FakeApp
-          otool -l Fake.dir/FakeApp | grep -A2 LC_RPATH
-          echo "--- dependências do tweak"
-          otool -L Fake.dir/Frameworks/TweakXZ.dylib
-          otool -L Fake.dir/Frameworks/CydiaSubstrate.framework/CydiaSubstrate
-          find Fake.dir -print
+            echo "--- load commands do app"
+            otool -L Fake.dir/FakeApp
+            otool -l Fake.dir/FakeApp | grep -A2 LC_RPATH
+            echo "--- dependências do tweak"
+            otool -L Fake.dir/Frameworks/TweakXZ.dylib
+            otool -L Fake.dir/Frameworks/CydiaSubstrate.framework/CydiaSubstrate
+            find Fake.dir -print
 
-          # Reassinar ad-hoc (no macOS arm64 tudo precisa de assinatura) e executar
-          for f in Fake.dir/Frameworks/*.dylib Fake.dir/Frameworks/CydiaSubstrate.framework/CydiaSubstrate Fake.dir/FakeApp; do
-            codesign -f -s - "$f"
-          done
-          OUT=$(./Fake.dir/FakeApp)
-          echo "$OUT"
+            # Reassinar ad-hoc (no macOS arm64 tudo precisa de assinatura) e executar
+            for f in Fake.dir/Frameworks/*.dylib Fake.dir/Frameworks/CydiaSubstrate.framework/CydiaSubstrate Fake.dir/FakeApp; do
+              codesign -f -s - "$f"
+            done
+            OUT=$(./Fake.dir/FakeApp)
+            echo "$OUT"
 
-          echo "$OUT" | grep -q "TWEAK_XZ_LOADED 42"
-          echo "$OUT" | grep -q "TWEAK_GZ_LOADED"
-          echo "$OUT" | grep -q "TWEAK_DYLIB_LOADED"
-          echo "$OUT" | grep -q "APP_RUNNING"
-          otool -L Fake.dir/Frameworks/TweakXZ.dylib | grep -q "@rpath/CydiaSubstrate.framework/CydiaSubstrate"
-          echo "OK: os três tweaks carregaram e o Substrate foi trocado pelo ElleKit embutido"
+            echo "$OUT" | grep -q "TWEAK_XZ_LOADED 42"
+            echo "$OUT" | grep -q "TWEAK_GZ_LOADED"
+            echo "$OUT" | grep -q "TWEAK_DYLIB_LOADED"
+            echo "$OUT" | grep -q "APP_RUNNING"
+            otool -L Fake.dir/Frameworks/TweakXZ.dylib | grep -q "@rpath/CydiaSubstrate.framework/CydiaSubstrate"
+            echo "OK: os três tweaks carregaram e o Substrate foi trocado pelo ElleKit embutido"
+          ) 2>&1 | tee "$LOG"
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            # O fim do log vira uma anotação, que aparece até sem login no GitHub.
+            echo "::error title=Injetar e executar falhou::$(tail -n 40 "$LOG" | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+            exit "$rc"
+          fi
