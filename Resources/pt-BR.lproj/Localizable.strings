@@ -500,8 +500,8 @@
 
 /* Compra de certificado (Features/CertShop) */
 "shop.lang" = "pt";
-"shop.plan.random.title" = "Aleatório";
-"shop.plan.random.subtitle" = "O mais barato. A validade vem aleatória.";
+"shop.plan.random.title" = "Instant Aleatório";
+"shop.plan.random.subtitle" = "O mais barato. Emissão na hora, sem garantia.";
 "shop.plan.instant.title" = "Instant";
 "shop.plan.instant.subtitle" = "Uso imediato, sem garantia.";
 "shop.plan.instant40.title" = "Instant · 40 dias";
@@ -509,11 +509,9 @@
 "shop.plan.instant300.title" = "Instant · 300 dias";
 "shop.plan.instant300.subtitle" = "A garantia mais longa.";
 "shop.plan.popular" = "Mais popular";
-"shop.validity.random" = "Aleatória";
 "shop.validity.12m" = "12 meses";
 "shop.warranty.days" = "%d dias";
 "shop.warranty.none" = "Sem garantia";
-"shop.chip.randomValidity" = "Validade aleatória";
 "shop.chip.12m" = "12 meses";
 "shop.chip.warranty" = "Garantia %d dias";
 "shop.chip.noWarranty" = "Sem garantia";
@@ -548,7 +546,6 @@
 "shop.plans.feeNote" = "A taxa do Pix ou do cartão aparece no pagamento.";
 "shop.confirm.title" = "Confirmar compra";
 "shop.confirm.subtitle" = "Assine e instale apps neste iPhone por 12 meses.";
-"shop.confirm.subtitleRandom" = "Assine e instale apps neste iPhone. A validade vem aleatória.";
 "shop.confirm.device" = "Este aparelho";
 "shop.confirm.plan" = "Plano";
 "shop.confirm.validity" = "Validade";
@@ -567,13 +564,19 @@
 "shop.udid.invalid" = "UDID inválido. Ele tem 25 caracteres (00008…-…) ou 40 nos iPhones antigos.";
 "shop.udid.detected" = "Detectado";
 "shop.udid.fromCertificate" = "Do certificado";
-"shop.udid.fromProfile" = "Pelo perfil";
 "shop.udid.placeholder" = "Cole ou digite o UDID";
-"shop.udid.discover" = "Descobrir pelo Safari";
+"shop.udid.discover" = "Descobrir automaticamente";
 "shop.udid.paste" = "Colar";
-"shop.udid.waiting" = "Instale o perfil no Safari e volte para cá.";
+"shop.udid.waiting" = "Esperando o UDID…";
 "shop.udid.fromCertificateNote" = "Veio do certificado “%@”. Confira se é deste iPhone.";
 "shop.udid.change" = "Usar outro UDID";
+"shop.udid.autoNote" = "O iOS não deixa nenhum app ler o UDID. Na primeira compra, o iPhone confirma o UDID com um perfil rápido; depois o XSign preenche sozinho e abre o pagamento. Só acontece uma vez.";
+"shop.udid.typeInstead" = "Prefiro digitar o UDID";
+"shop.udid.step1" = "Toque em Permitir para baixar o perfil.";
+"shop.udid.step2" = "Abra Ajustes › Perfil Transferido e toque em Instalar.";
+"shop.udid.step3Buy" = "O XSign volta sozinho, preenche o UDID e abre o pagamento.";
+"shop.udid.step3" = "O XSign volta sozinho e preenche o UDID.";
+"shop.udid.reopen" = "Abrir o perfil de novo";
 "shop.banner.offer.title" = "Comprar certificado";
 "shop.banner.offer.subtitle" = "Planos a partir de %@";
 "shop.banner.offer.pill" = "Comprar";

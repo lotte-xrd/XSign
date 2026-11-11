@@ -117,7 +117,8 @@ enum KeychainHelper {
         return fresh
     }
 
-    static func save(key: String, value: String) {
+    /// `thisDeviceOnly`: o item não vai junto num backup restaurado em outro aparelho.
+    static func save(key: String, value: String, thisDeviceOnly: Bool = false) {
         guard let data = value.data(using: .utf8) else { return }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -127,7 +128,9 @@ enum KeychainHelper {
         SecItemDelete(query as CFDictionary)
         var addQuery = query
         addQuery[kSecValueData as String] = data
-        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        addQuery[kSecAttrAccessible as String] = thisDeviceOnly
+            ? kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            : kSecAttrAccessibleAfterFirstUnlock
         SecItemAdd(addQuery as CFDictionary, nil)
     }
 
