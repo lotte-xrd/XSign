@@ -3,6 +3,7 @@ import SwiftUI
 /// As cinco abas: Apps em primeiro lugar, seguido de Downloads, Loja, Arquivos e Ajustes.
 struct RootTabView: View {
     @EnvironmentObject private var app: AppState
+    @EnvironmentObject private var shop: CertShopController
 
     var body: some View {
         TabView(selection: $app.selectedTab) {
@@ -26,6 +27,17 @@ struct RootTabView: View {
             SettingsView()
                 .tabItem { Label(L.tr("tab.settings"), systemImage: "gearshape") }
                 .tag(AppTab.settings)
+        }
+        // Compra de certificado: planos e pagamento numa folha, andamento em tela cheia.
+        .sheet(isPresented: $shop.shopPresented) {
+            CertShopSheet()
+                .environmentObject(app)
+                .environmentObject(shop)
+        }
+        .fullScreenCover(isPresented: $shop.progressPresented) {
+            CertProgressView()
+                .environmentObject(app)
+                .environmentObject(shop)
         }
     }
 }

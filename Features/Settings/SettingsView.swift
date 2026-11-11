@@ -4,6 +4,7 @@ import UIKit
 struct SettingsView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var language: LocalizationManager
+    @EnvironmentObject private var shop: CertShopController
     @State private var showUpToDateAlert = false
 
     var body: some View {
@@ -24,6 +25,10 @@ struct SettingsView: View {
                     NavigationLink { ImportResourceView() } label: {
                         Label(L.tr("files.import"), systemImage: "tray.and.arrow.down")
                     }
+                    Button { shop.openShop() } label: {
+                        Label(L.tr("shop.settings.buy"), systemImage: "cart")
+                    }
+                    .foregroundStyle(Color.graphite)
                 }
 
                 Section(L.tr("settings.signing")) {
