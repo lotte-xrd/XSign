@@ -191,7 +191,8 @@ struct ChipFlow: Layout {
 struct CertConfirmView: View {
     @EnvironmentObject private var shop: CertShopController
     @FocusState private var udidFocused: Bool
-    @State private var editingUDID = false
+    /// A pessoa escolheu digitar ou colar o UDID.
+    @State private var manualEntry = false
     @State private var copied = false
 
     private var plan: CertPlan { shop.selectedPlan }
@@ -239,11 +240,17 @@ struct CertConfirmView: View {
         .safeAreaInset(edge: .bottom) { bottomBar }
         .onAppear {
             shop.prepareUDID()
-            editingUDID = shop.normalizedUDID == nil
+            manualEntry = shop.normalizedUDID == nil && !shop.needsUDIDDiscovery
         }
         .onChange(of: shop.udidSource) { source in
             if source != .manual, source != .none, shop.normalizedUDID != nil {
-                withAnimation(.xsignSmooth) { editingUDID = false }
+                withAnimation(.xsignSmooth) { manualEntry = false }
+            }
+        }
+        .onChange(of: shop.discoveringUDID) { discovering in
+            if discovering {
+                udidFocused = false
+                withAnimation(.xsignSmooth) { manualEntry = false }
             }
         }
     }
@@ -263,7 +270,7 @@ struct CertConfirmView: View {
                 )
                 .padding(.bottom, 6)
             Text(plan.title).font(.title3.weight(.semibold))
-            Text(plan.randomValidity ? L.tr("shop.confirm.subtitleRandom") : L.tr("shop.confirm.subtitle"))
+            Text(L.tr("shop.confirm.subtitle"))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -281,9 +288,8 @@ struct CertConfirmView: View {
     private var sourceBadge: String? {
         guard shop.normalizedUDID != nil else { return nil }
         switch shop.udidSource {
-        case .embedded: return L.tr("shop.udid.detected")
+        case .embedded, .saved, .profile: return L.tr("shop.udid.detected")
         case .certificate: return L.tr("shop.udid.fromCertificate")
-        case .profile: return L.tr("shop.udid.fromProfile")
         case .manual, .none: return nil
         }
     }
@@ -324,78 +330,148 @@ struct CertConfirmView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            if editingUDID {
-                TextField(
-                    L.tr("shop.udid.placeholder"),
-                    text: Binding(get: { shop.udidInput }, set: { shop.userEditedUDID($0) })
-                )
-                .font(.system(.footnote, design: .monospaced))
-                .textInputAutocapitalization(.characters)
-                .autocorrectionDisabled()
-                .keyboardType(.asciiCapable)
-                .focused($udidFocused)
-                .submitLabel(.done)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 9)
-                .background(Color.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-                HStack(spacing: 8) {
-                    Button {
-                        udidFocused = false
-                        shop.startUDIDDiscovery()
-                    } label: {
-                        Label(L.tr("shop.udid.discover"), systemImage: "safari")
-                    }
-                    Spacer()
-                    Button(L.tr("shop.udid.paste")) {
-                        if let text = UIPasteboard.general.string { shop.userEditedUDID(text) }
-                    }
-                }
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(Color.graphite)
-                .padding(.top, 2)
-
-                if shop.discoveringUDID {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.mini)
-                        Text(L.tr("shop.udid.waiting"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+            if manualEntry {
+                manualUDIDField
+            } else if shop.normalizedUDID != nil {
+                udidValue
+            } else if shop.discoveringUDID {
+                udidWaiting
             } else {
-                HStack(spacing: 8) {
-                    Text(shop.normalizedUDID ?? shop.udidInput)
-                        .font(.system(.footnote, design: .monospaced))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .textSelection(.enabled)
-                    Spacer()
-                    Button {
-                        UIPasteboard.general.string = shop.normalizedUDID
-                        withAnimation(.xsignSmooth) { copied = true }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
-                            withAnimation(.xsignSmooth) { copied = false }
-                        }
-                    } label: {
-                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                            .foregroundStyle(Color.lead)
-                    }
-                    .buttonStyle(.plain)
-                }
-                if shop.udidSource == .certificate, let name = shop.udidSourceName {
-                    Text(L.tr("shop.udid.fromCertificateNote", name))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Button(L.tr("shop.udid.change")) {
-                    withAnimation(.xsignSmooth) { editingUDID = true }
-                    udidFocused = true
-                }
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(Color.graphite)
-                .padding(.top, 2)
+                udidAutomatic
             }
+        }
+    }
+
+    /// Sem UDID ainda: explica que o Comprar confirma o UDID sozinho.
+    private var udidAutomatic: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "wand.and.stars")
+                    .foregroundStyle(Color.moss)
+                    .padding(.top, 1)
+                Text(L.tr("shop.udid.autoNote"))
+                    .font(.footnote)
+                    .foregroundStyle(Color.lead)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button(L.tr("shop.udid.typeInstead")) {
+                withAnimation(.xsignSmooth) { manualEntry = true }
+                udidFocused = true
+            }
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(Color.graphite)
+        }
+    }
+
+    /// Perfil aberto no Safari: mostra o que falta e espera o UDID voltar.
+    private var udidWaiting: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(L.tr("shop.udid.waiting"))
+                    .font(.footnote.weight(.semibold))
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                stepLine(1, L.tr("shop.udid.step1"))
+                stepLine(2, L.tr("shop.udid.step2"))
+                stepLine(3, shop.discovery?.buyPlanID != nil ? L.tr("shop.udid.step3Buy") : L.tr("shop.udid.step3"))
+            }
+            HStack {
+                Button(L.tr("shop.udid.reopen")) { shop.openUDIDProfile() }
+                    .foregroundStyle(Color.graphite)
+                Spacer()
+                Button(L.tr("common.cancel")) {
+                    withAnimation(.xsignSmooth) { shop.cancelUDIDDiscovery() }
+                }
+                .foregroundStyle(Color.lead)
+            }
+            .font(.footnote.weight(.semibold))
+            .padding(.top, 2)
+        }
+    }
+
+    private func stepLine(_ number: Int, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("\(number)")
+                .font(.caption2.weight(.bold).monospacedDigit())
+                .foregroundStyle(Color.lead)
+                .frame(width: 18, height: 18)
+                .background(Color.fill, in: Circle())
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(Color.lead)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var manualUDIDField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField(
+                L.tr("shop.udid.placeholder"),
+                text: Binding(get: { shop.udidInput }, set: { shop.userEditedUDID($0) })
+            )
+            .font(.system(.footnote, design: .monospaced))
+            .textInputAutocapitalization(.characters)
+            .autocorrectionDisabled()
+            .keyboardType(.asciiCapable)
+            .focused($udidFocused)
+            .submitLabel(.done)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .background(Color.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            HStack(spacing: 8) {
+                Button {
+                    udidFocused = false
+                    shop.userEditedUDID("")
+                    shop.startUDIDDiscovery()
+                } label: {
+                    Label(L.tr("shop.udid.discover"), systemImage: "wand.and.stars")
+                }
+                Spacer()
+                Button(L.tr("shop.udid.paste")) {
+                    if let text = UIPasteboard.general.string { shop.userEditedUDID(text) }
+                }
+            }
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(Color.graphite)
+            .padding(.top, 2)
+        }
+    }
+
+    private var udidValue: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(shop.normalizedUDID ?? shop.udidInput)
+                    .font(.system(.footnote, design: .monospaced))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .textSelection(.enabled)
+                Spacer()
+                Button {
+                    UIPasteboard.general.string = shop.normalizedUDID
+                    withAnimation(.xsignSmooth) { copied = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                        withAnimation(.xsignSmooth) { copied = false }
+                    }
+                } label: {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        .foregroundStyle(Color.lead)
+                }
+                .buttonStyle(.plain)
+            }
+            if shop.udidSource == .certificate, let name = shop.udidSourceName {
+                Text(L.tr("shop.udid.fromCertificateNote", name))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Button(L.tr("shop.udid.change")) {
+                withAnimation(.xsignSmooth) { manualEntry = true }
+                udidFocused = true
+            }
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(Color.graphite)
+            .padding(.top, 2)
         }
     }
 
@@ -462,7 +538,7 @@ struct CertConfirmView: View {
             }
             .font(.subheadline)
 
-            PrimaryButton(title: buttonTitle, enabled: shop.normalizedUDID != nil && !shop.isCreating) {
+            PrimaryButton(title: buttonTitle, enabled: canBuy) {
                 udidFocused = false
                 Task { await shop.buy() }
             }
@@ -477,7 +553,13 @@ struct CertConfirmView: View {
         .background(.bar)
     }
 
+    /// Sem UDID nenhum, Comprar também vale: confirma o UDID pelo perfil e segue.
+    private var canBuy: Bool {
+        !shop.isCreating && !shop.discoveringUDID && (shop.normalizedUDID != nil || shop.needsUDIDDiscovery)
+    }
+
     private var buttonTitle: String {
+        if shop.discoveringUDID { return L.tr("shop.udid.waiting") }
         if shop.isCreating { return L.tr("shop.confirm.opening") }
         return shop.openCheckoutForSelection != nil ? L.tr("shop.confirm.continuePayment") : L.tr("shop.confirm.buy")
     }

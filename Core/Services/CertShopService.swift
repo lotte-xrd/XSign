@@ -13,15 +13,14 @@ struct CertPlan: Identifiable, Hashable {
     let popular: Bool
     /// Dias de garantia; `nil` = sem garantia.
     let warrantyDays: Int?
-    let randomValidity: Bool
     let allIOS: Bool
     let jit: Bool
 
     static let all: [CertPlan] = [
-        CertPlan(id: "random", priceBrl: 40, priceUsd: 8, popular: false, warrantyDays: nil, randomValidity: true, allIOS: false, jit: false),
-        CertPlan(id: "instant", priceBrl: 60, priceUsd: 12, popular: false, warrantyDays: nil, randomValidity: false, allIOS: false, jit: false),
-        CertPlan(id: "instant40", priceBrl: 99, priceUsd: 20, popular: false, warrantyDays: 40, randomValidity: false, allIOS: true, jit: true),
-        CertPlan(id: "instant300", priceBrl: 125, priceUsd: 25, popular: true, warrantyDays: 300, randomValidity: false, allIOS: true, jit: true),
+        CertPlan(id: "random", priceBrl: 40, priceUsd: 8, popular: false, warrantyDays: nil, allIOS: false, jit: false),
+        CertPlan(id: "instant", priceBrl: 60, priceUsd: 12, popular: false, warrantyDays: nil, allIOS: false, jit: false),
+        CertPlan(id: "instant40", priceBrl: 99, priceUsd: 20, popular: false, warrantyDays: 40, allIOS: true, jit: true),
+        CertPlan(id: "instant300", priceBrl: 125, priceUsd: 25, popular: true, warrantyDays: 300, allIOS: true, jit: true),
     ]
 
     static let defaultID = "instant300"
@@ -33,7 +32,8 @@ struct CertPlan: Identifiable, Hashable {
     var title: String { L.tr("shop.plan.\(id).title") }
     var subtitle: String { L.tr("shop.plan.\(id).subtitle") }
     var price: String { CertShop.formatPrice(brl: priceBrl, usd: priceUsd) }
-    var validityText: String { randomValidity ? L.tr("shop.validity.random") : L.tr("shop.validity.12m") }
+    /// Todos os planos valem 12 meses.
+    var validityText: String { L.tr("shop.validity.12m") }
     var warrantyText: String {
         warrantyDays.map { L.tr("shop.warranty.days", $0) } ?? L.tr("shop.warranty.none")
     }
@@ -45,7 +45,7 @@ struct CertPlan: Identifiable, Hashable {
 
     var chips: [Chip] {
         [
-            Chip(text: randomValidity ? L.tr("shop.chip.randomValidity") : L.tr("shop.chip.12m"), warning: randomValidity),
+            Chip(text: L.tr("shop.chip.12m"), warning: false),
             Chip(text: warrantyDays.map { L.tr("shop.chip.warranty", $0) } ?? L.tr("shop.chip.noWarranty"), warning: warrantyDays == nil),
             Chip(text: allIOS ? L.tr("shop.chip.allIOS") : L.tr("shop.chip.ios16"), warning: !allIOS),
             Chip(text: jit ? L.tr("shop.chip.jit") : L.tr("shop.chip.noJit"), warning: !jit),
@@ -189,11 +189,11 @@ struct CertShopAPI {
         }
     }
 
-    /// Página aberta no Safari que instala o perfil e mostra o UDID.
-    func udidPageURL(session: String) -> URL {
-        var comps = URLComponents(url: baseURL.appendingPathComponent("xsign/udid/\(session)"), resolvingAgainstBaseURL: false)
-        comps?.queryItems = [URLQueryItem(name: "lang", value: CertShop.lang)]
-        return comps?.url ?? baseURL
+    /// Perfil "Profile Service" aberto direto no Safari: o iOS já pergunta se
+    /// pode baixar, sem passar pela página de instruções. Depois de instalado,
+    /// o Safari volta para a página do UDID, que abre o XSign sozinha.
+    func udidProfileURL(session: String) -> URL {
+        baseURL.appendingPathComponent("xsign/udid/\(session)/perfil.mobileconfig")
     }
 
     private func request(_ path: String, method: String = "GET", body: [String: Any]? = nil) -> URLRequest {
@@ -241,11 +241,11 @@ struct CertShopAPI {
 // MARK: - UDID deste iPhone
 
 /// O iOS não deixa um app ler o UDID. Ele vem do perfil que instalou o XSign
-/// (quando é de um único aparelho, só pode ser este), de um certificado
-/// importado com um único aparelho, do perfil de descoberta pelo Safari ou do
-/// próprio usuário.
+/// (quando é de um único aparelho, só pode ser este), do UDID já confirmado
+/// antes neste iPhone, de um certificado importado com um único aparelho, do
+/// perfil de descoberta pelo Safari ou do próprio usuário.
 enum UDIDSource: String, Codable {
-    case none, embedded, certificate, profile, manual
+    case none, embedded, saved, certificate, profile, manual
 }
 
 enum DeviceUDID {
@@ -273,6 +273,20 @@ enum DeviceUDID {
               let info = try? CertificateService().readProfile(data: data),
               info.devices.count == 1 else { return nil }
         return normalize(info.devices[0])
+    }
+
+    private static let savedKey = "xsign.device.udid"
+
+    /// UDID já confirmado neste iPhone (perfil embutido ou perfil de descoberta).
+    static var saved: String? {
+        KeychainHelper.read(key: savedKey).flatMap(normalize)
+    }
+
+    /// Guarda o UDID confirmado no Keychain, só deste aparelho (não vai para
+    /// backups restaurados em outro iPhone), para não pedir de novo.
+    static func remember(_ udid: String) {
+        guard let value = normalize(udid), value != saved else { return }
+        KeychainHelper.save(key: savedKey, value: value, thisDeviceOnly: true)
     }
 
     /// UDID de um certificado importado que vale para um único aparelho.

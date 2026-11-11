@@ -16,6 +16,18 @@ struct PendingCertOrder: Codable, Equatable {
     var successShown: Bool = false
 }
 
+/// Descoberta do UDID pelo perfil em andamento, guardada para sobreviver se o
+/// iOS fechar o XSign enquanto a pessoa instala o perfil em Ajustes.
+struct UDIDDiscovery: Codable, Equatable {
+    var session: String
+    /// Plano a comprar assim que o UDID chegar (`nil` = só preencher).
+    var buyPlanID: String?
+    var startedAt: Date
+
+    /// O servidor guarda a sessão por 1 hora.
+    var isExpired: Bool { Date().timeIntervalSince(startedAt) > 3600 }
+}
+
 /// Compra de certificado dentro do app: escolhe o plano, cria o pedido no
 /// servidor, abre o pagamento numa janela do Safari, acompanha o pedido e
 /// importa o certificado sozinho quando fica pronto.
@@ -31,7 +43,7 @@ final class CertShopController: ObservableObject {
     @Published var udidInput = ""
     @Published var udidSource: UDIDSource = .none
     @Published private(set) var udidSourceName: String?
-    @Published private(set) var discoveringUDID = false
+    @Published private(set) var discovery: UDIDDiscovery?
 
     // Pedido
     @Published private(set) var pending: PendingCertOrder?
@@ -46,16 +58,24 @@ final class CertShopController: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var pollGeneration = 0
     private var consecutiveErrors = 0
-    private var udidSession: String?
+    private var udidWatch: Task<Void, Never>?
     private var backgroundGuard: BackgroundTaskGuard?
 
     private static let storeKey = "xsign.certshop.pending"
+    private static let discoveryKey = "xsign.certshop.udidDiscovery"
 
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.storeKey),
            let saved = try? JSONDecoder().decode(PendingCertOrder.self, from: data) {
             pending = saved
             selectedPlanID = saved.planID
+        }
+        if let data = UserDefaults.standard.data(forKey: Self.discoveryKey),
+           let saved = try? JSONDecoder().decode(UDIDDiscovery.self, from: data), !saved.isExpired {
+            discovery = saved
+            if let plan = saved.buyPlanID { selectedPlanID = plan }
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.discoveryKey)
         }
     }
 
@@ -69,6 +89,9 @@ final class CertShopController: ObservableObject {
     var normalizedUDID: String? { DeviceUDID.normalize(udidInput) }
     var pendingPlan: CertPlan? { pending.flatMap { CertPlan.find($0.planID) } }
     var isImported: Bool { pending?.importedCertificateID != nil }
+    var discoveringUDID: Bool { discovery != nil }
+    /// Sem UDID nenhum: o botão Comprar descobre pelo perfil antes de cobrar.
+    var needsUDIDDiscovery: Bool { udidInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var importedCertificate: Certificate? {
         guard let id = pending?.importedCertificateID else { return nil }
@@ -115,7 +138,10 @@ final class CertShopController: ObservableObject {
     func prepareUDID() {
         if normalizedUDID != nil, udidSource != .none { return }
         if let embedded = DeviceUDID.fromEmbeddedProfile() {
+            DeviceUDID.remember(embedded)
             setUDID(embedded, source: .embedded)
+        } else if let saved = DeviceUDID.saved {
+            setUDID(saved, source: .saved)
         } else if let fromCert = DeviceUDID.fromCertificates(app?.certificates ?? []) {
             setUDID(fromCert.udid, source: .certificate, name: fromCert.name)
         } else if let pending, pending.importedCertificateID == nil {
@@ -135,51 +161,120 @@ final class CertShopController: ObservableObject {
         udidSourceName = name
     }
 
-    // MARK: - Descobrir o UDID pelo Safari (perfil "Profile Service")
+    // MARK: - Descobrir o UDID pelo perfil ("Profile Service")
+    //
+    // O iOS não entrega o UDID a nenhum app. O mais perto de automático é o
+    // perfil de descoberta: o XSign abre o perfil no Safari, a pessoa instala
+    // em Ajustes, o iPhone manda o UDID ao servidor e o Safari abre o XSign de
+    // volta. O app preenche sozinho, guarda o UDID e, se veio do botão
+    // Comprar, segue direto para o pagamento. Só acontece uma vez por iPhone.
 
-    func startUDIDDiscovery() {
-        let session = DeviceUDID.newSessionID()
-        udidSession = session
-        discoveringUDID = true
-        UIApplication.shared.open(CertShopAPI.current().udidPageURL(session: session))
+    /// `thenBuy`: quando o UDID chegar, cria o pedido e abre o pagamento.
+    func startUDIDDiscovery(thenBuy: Bool = false) {
+        errorMessage = nil
+        discovery = UDIDDiscovery(
+            session: DeviceUDID.newSessionID(),
+            buyPlanID: thenBuy ? selectedPlanID : nil,
+            startedAt: Date()
+        )
+        saveDiscovery()
+        openUDIDProfile()
+    }
+
+    /// Abre (de novo) o perfil da descoberta em andamento.
+    func openUDIDProfile() {
+        guard let session = discovery?.session else { return }
+        UIApplication.shared.open(CertShopAPI.current().udidProfileURL(session: session))
     }
 
     /// Link xsign://udid?session=…&value=… vindo da página do UDID.
     func receiveUDIDLink(session: String?, value: String?) {
-        guard let session, session == udidSession, let value, let udid = DeviceUDID.normalize(value) else {
-            if udidSession != nil { Task { await checkUDIDSession() } }
-            return
+        // Com o app abrindo do zero, espera a tela inicial: resume() confere no servidor.
+        guard let current = discovery, app?.isBootstrapping != true else { return }
+        if let session, session == current.session, let value, let udid = DeviceUDID.normalize(value) {
+            finishUDIDDiscovery(udid)
+        } else {
+            Task { await checkUDIDSession() }
         }
-        finishUDIDDiscovery(udid)
     }
 
     func checkUDIDSession() async {
-        guard let session = udidSession else { return }
-        if let found = try? await CertShopAPI.current().foundUDID(session: session),
-           let udid = DeviceUDID.normalize(found.udid), session == udidSession {
+        guard let current = discovery else { return }
+        if current.isExpired {
+            cancelUDIDDiscovery()
+            return
+        }
+        if let found = try? await CertShopAPI.current().foundUDID(session: current.session),
+           let udid = DeviceUDID.normalize(found.udid), discovery?.session == current.session {
             finishUDIDDiscovery(udid)
         }
     }
 
+    /// Com o app aberto, confere a cada 3 s se o UDID já chegou (cobre quem
+    /// volta ao XSign sem tocar em "Abrir" no Safari).
+    private func watchUDIDSession() {
+        udidWatch?.cancel()
+        guard discovery != nil else { return }
+        udidWatch = Task {
+            for _ in 0..<60 {
+                guard !Task.isCancelled, self.discovery != nil,
+                      UIApplication.shared.applicationState == .active else { return }
+                await self.checkUDIDSession()
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+            }
+        }
+    }
+
     private func finishUDIDDiscovery(_ udid: String) {
-        udidSession = nil
-        discoveringUDID = false
+        let planToBuy = discovery?.buyPlanID
+        stopUDIDDiscovery()
+        DeviceUDID.remember(udid)
         setUDID(udid, source: .profile)
         errorMessage = nil
-        if !shopPresented, !progressPresented { shopPresented = true }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+
+        guard !progressPresented else { return }
+        let wasPresented = shopPresented
+        shopPresented = true
+        guard let planToBuy else { return }
+        selectedPlanID = planToBuy
+        Task {
+            // Se a folha da compra precisou abrir agora, espera ela aparecer.
+            if !wasPresented { try? await Task.sleep(nanoseconds: 650_000_000) }
+            await buy()
+        }
     }
 
     func cancelUDIDDiscovery() {
-        udidSession = nil
-        discoveringUDID = false
+        stopUDIDDiscovery()
+    }
+
+    private func stopUDIDDiscovery() {
+        udidWatch?.cancel()
+        udidWatch = nil
+        discovery = nil
+        saveDiscovery()
+    }
+
+    private func saveDiscovery() {
+        if let discovery, let data = try? JSONEncoder().encode(discovery) {
+            UserDefaults.standard.set(data, forKey: Self.discoveryKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.discoveryKey)
+        }
     }
 
     // MARK: - Comprar
 
     func buy() async {
-        guard !isCreating else { return }
+        guard !isCreating, discovery == nil else { return }
         guard let udid = normalizedUDID else {
-            errorMessage = L.tr("shop.udid.invalid")
+            if needsUDIDDiscovery {
+                // Primeira compra neste iPhone: confirma o UDID pelo perfil e continua sozinho.
+                startUDIDDiscovery(thenBuy: true)
+            } else {
+                errorMessage = L.tr("shop.udid.invalid")
+            }
             return
         }
         errorMessage = nil
@@ -291,8 +386,9 @@ final class CertShopController: ObservableObject {
 
     // MARK: - Ciclo de vida do app
 
-    /// Fim do bootstrap: retoma o pedido salvo.
+    /// Fim do bootstrap: retoma o pedido salvo e a descoberta do UDID.
     func resume() {
+        if discovery != nil { watchUDIDSession() }
         guard let pending else { return }
         if pending.importedCertificateID != nil {
             if importedCertificate == nil || pending.successShown {
@@ -308,7 +404,7 @@ final class CertShopController: ObservableObject {
     func appBecameActive() {
         backgroundGuard?.end()
         backgroundGuard = nil
-        if udidSession != nil { Task { await checkUDIDSession() } }
+        if discovery != nil { watchUDIDSession() }
         guard let pending else { return }
         if pending.importedCertificateID != nil {
             if !pending.successShown, importedCertificate != nil { presentSuccess() }
