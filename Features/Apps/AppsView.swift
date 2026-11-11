@@ -40,6 +40,12 @@ struct AppsView: View {
                 .padding(.horizontal, Spacing.screen).padding(.vertical, 8)
                 .disabled(selecting)
 
+                if !selecting {
+                    CertShopBanner()
+                        .padding(.horizontal, Spacing.screen)
+                        .padding(.bottom, 8)
+                }
+
                 if list.isEmpty {
                     VStack(spacing: 14) {
                         EmptyStateView(title: L.tr("apps.empty.title"), message: L.tr("apps.empty.message"))

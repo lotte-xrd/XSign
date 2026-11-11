@@ -12,6 +12,7 @@ struct XSignApp: App {
             ZStack {
                 RootTabView()
                     .environmentObject(appState)
+                    .environmentObject(appState.certShop)
                     .environmentObject(language)
                     .alert(
                         L.tr("revoked.alert.title"),
@@ -98,10 +99,12 @@ struct XSignApp: App {
                     if !appState.isBootstrapping {
                         appState.importFinishedBackgroundSigns()
                         appState.resumePendingInstallIfNeeded()
+                        appState.certShop.appBecameActive()
                         Task { await appState.refreshAppleRevocation(force: false) }
                     }
                 case .background:
                     Task { await appState.sendHeartbeat(state: "background") }
+                    appState.certShop.appEnteredBackground()
                     appState.closeForUpdateIfArmed(immediately: true)
                 default:
                     break

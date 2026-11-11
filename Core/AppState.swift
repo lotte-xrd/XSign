@@ -79,6 +79,8 @@ final class AppState: ObservableObject {
     let certificateService = CertificateService()
     let installService: InstallService = OTAInstallService()
     let signingService: SigningService = RemoteSigningService()
+    /// Compra de certificado dentro do app (Features/CertShop).
+    let certShop: CertShopController
 
     private var downloadsCancellable: AnyCancellable?
     private var languageCancellable: AnyCancellable?
@@ -89,6 +91,7 @@ final class AppState: ObservableObject {
     }
 
     init() {
+        certShop = CertShopController()
         downloadsCancellable = downloads.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
@@ -114,6 +117,7 @@ final class AppState: ObservableObject {
                 }
             }
         }
+        certShop.attach(self)
     }
 
     // MARK: - Ciclo de vida
@@ -204,6 +208,7 @@ final class AppState: ObservableObject {
         startHeartbeatLoop()
         importFinishedBackgroundSigns()
         resumePendingInstallIfNeeded()
+        certShop.resume()
         Task { _ = await checkForAppUpdate(manual: false) }
         Task { await refreshAppleRevocation(force: false) }
 
@@ -605,6 +610,15 @@ final class AppState: ObservableObject {
             Task {
                 _ = try? await importResourcesWithHUD(urls: [url])
             }
+            return
+        }
+        // Volta da página que descobre o UDID: xsign://udid?session=…&value=…
+        if url.scheme == "xsign", url.host == "udid" {
+            let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            certShop.receiveUDIDLink(
+                session: items.first(where: { $0.name == "session" })?.value,
+                value: items.first(where: { $0.name == "value" })?.value
+            )
             return
         }
         guard url.scheme == "xsign",
