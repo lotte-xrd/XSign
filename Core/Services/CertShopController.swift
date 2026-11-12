@@ -14,6 +14,8 @@ struct PendingCertOrder: Codable, Equatable {
     var importSeconds: Double?
     var importedCertificateID: UUID?
     var successShown: Bool = false
+    /// E-mail mandado com o pedido (1.4.2+).
+    var email: String?
 }
 
 /// Descoberta do UDID pelo perfil em andamento, guardada para sobreviver se o
@@ -44,6 +46,7 @@ final class CertShopController: ObservableObject {
     @Published var udidSource: UDIDSource = .none
     @Published private(set) var udidSourceName: String?
     @Published private(set) var discovery: UDIDDiscovery?
+    @Published var emailInput = CustomerEmail.saved
 
     // Pedido
     @Published private(set) var pending: PendingCertOrder?
@@ -87,6 +90,7 @@ final class CertShopController: ObservableObject {
 
     var selectedPlan: CertPlan { CertPlan.find(selectedPlanID) ?? CertPlan.all[CertPlan.all.count - 1] }
     var normalizedUDID: String? { DeviceUDID.normalize(udidInput) }
+    var normalizedEmail: String? { CustomerEmail.normalize(emailInput) }
     var pendingPlan: CertPlan? { pending.flatMap { CertPlan.find($0.planID) } }
     var isImported: Bool { pending?.importedCertificateID != nil }
     var discoveringUDID: Bool { discovery != nil }
@@ -103,7 +107,8 @@ final class CertShopController: ObservableObject {
         guard let pending, pending.importedCertificateID == nil,
               order?.isAwaitingPayment ?? true,
               pending.planID == selectedPlanID,
-              pending.udid == normalizedUDID else { return nil }
+              pending.udid == normalizedUDID,
+              pending.email == normalizedEmail else { return nil }
         return pending
     }
 
@@ -268,6 +273,13 @@ final class CertShopController: ObservableObject {
 
     func buy() async {
         guard !isCreating, discovery == nil else { return }
+        guard let email = normalizedEmail else {
+            let empty = emailInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            errorMessage = L.tr(empty ? "shop.email.missing" : "shop.email.invalid")
+            return
+        }
+        // Guarda já: se o UDID ainda vai ser descoberto, a compra continua com ele.
+        CustomerEmail.remember(email)
         guard let udid = normalizedUDID else {
             if needsUDIDDiscovery {
                 // Primeira compra neste iPhone: confirma o UDID pelo perfil e continua sozinho.
@@ -299,7 +311,7 @@ final class CertShopController: ObservableObject {
 
         requestNotificationPermission()
         do {
-            let created = try await CertShopAPI.current().createOrder(planID: selectedPlanID, udid: udid)
+            let created = try await CertShopAPI.current().createOrder(planID: selectedPlanID, udid: udid, email: email)
             guard let url = URL(string: created.checkoutUrl) else {
                 throw CertShopAPI.APIError(message: L.tr("shop.error.response"))
             }
@@ -309,7 +321,8 @@ final class CertShopController: ObservableObject {
                 planID: selectedPlanID,
                 udid: created.order.udid,
                 checkoutURL: url,
-                createdAt: Date()
+                createdAt: Date(),
+                email: email
             )
             order = created.order
             importError = nil

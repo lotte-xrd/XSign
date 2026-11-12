@@ -165,9 +165,9 @@ struct CertShopAPI {
         return CertShopAPI(baseURL: url)
     }
 
-    func createOrder(planID: String, udid: String) async throws -> CertOrderCreated {
+    func createOrder(planID: String, udid: String, email: String) async throws -> CertOrderCreated {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
-        let body: [String: Any] = ["planId": planID, "udid": udid, "lang": CertShop.lang, "appVersion": version]
+        let body: [String: Any] = ["planId": planID, "udid": udid, "email": email, "lang": CertShop.lang, "appVersion": version]
         return try await send(request("api/xsign/store/orders", method: "POST", body: body), as: CertOrderCreated.self)
     }
 
@@ -235,6 +235,28 @@ struct CertShopAPI {
         } catch {
             throw APIError(message: L.tr("shop.error.response"), status: status)
         }
+    }
+}
+
+// MARK: - E-mail do cliente
+
+/// E-mail pedido na compra: vai para o recibo do Mercado Pago ou do Stripe e
+/// para o aviso de venda. Fica salvo para a próxima compra.
+enum CustomerEmail {
+    private static let key = "xsign.certshop.email"
+
+    static func normalize(_ raw: String) -> String? {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard value.count <= 254,
+              value.range(of: #"^[^\s@"'<>]+@[^\s@"'<>]+\.[a-z]{2,}$"#, options: .regularExpression) != nil
+        else { return nil }
+        return value
+    }
+
+    static var saved: String { UserDefaults.standard.string(forKey: key) ?? "" }
+
+    static func remember(_ email: String) {
+        UserDefaults.standard.set(email, forKey: key)
     }
 }
 
