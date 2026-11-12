@@ -191,6 +191,7 @@ struct ChipFlow: Layout {
 struct CertConfirmView: View {
     @EnvironmentObject private var shop: CertShopController
     @FocusState private var udidFocused: Bool
+    @FocusState private var emailFocused: Bool
     /// A pessoa escolheu digitar ou colar o UDID.
     @State private var manualEntry = false
     @State private var copied = false
@@ -214,6 +215,16 @@ struct CertConfirmView: View {
                         .padding(.horizontal, 16)
                         .padding(.top, 6)
                 }
+
+                sectionHeader(L.tr("shop.email.title"))
+                    .padding(.top, 20)
+                emailCard
+                Text(emailHint ?? L.tr("shop.email.note"))
+                    .font(.caption)
+                    .foregroundStyle(emailHint == nil ? Color.secondary : Color.brick)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 6)
 
                 sectionHeader(L.tr("shop.confirm.plan"))
                     .padding(.top, 20)
@@ -475,6 +486,37 @@ struct CertConfirmView: View {
         }
     }
 
+    private var emailCard: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "envelope")
+                .font(.body)
+                .foregroundStyle(Color.graphite)
+                .frame(width: 24)
+            TextField(L.tr("shop.email.placeholder"), text: $shop.emailInput)
+                .font(.callout)
+                .keyboardType(.emailAddress)
+                .textContentType(.emailAddress)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.done)
+                .focused($emailFocused)
+            if shop.normalizedEmail != nil {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Color.moss)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Color.surface, in: RoundedRectangle(cornerRadius: Radius.group, style: .continuous))
+    }
+
+    /// Aviso de e-mail inválido (só depois de sair do campo).
+    private var emailHint: String? {
+        guard !emailFocused, shop.normalizedEmail == nil,
+              !shop.emailInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return L.tr("shop.email.invalid")
+    }
+
     private var planCard: some View {
         VStack(spacing: 0) {
             infoRow(L.tr("shop.confirm.plan"), plan.title)
@@ -540,6 +582,7 @@ struct CertConfirmView: View {
 
             PrimaryButton(title: buttonTitle, enabled: canBuy) {
                 udidFocused = false
+                emailFocused = false
                 Task { await shop.buy() }
             }
 
@@ -594,37 +637,78 @@ struct SafariView: UIViewControllerRepresentable {
 
 // MARK: - Cartão da tela Apps
 
+/// Ícone de certificado (.p12 / .mobileprovision): documento com selo.
+struct CertificateIcon: View {
+    var size: CGFloat = 52
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * Radius.icon, style: .continuous)
+                .fill(Color.white)
+            Image(systemName: "doc.text.fill")
+                .font(.system(size: size * 0.46, weight: .regular))
+                .foregroundStyle(CertShopPalette.deep)
+                .offset(x: -size * 0.07, y: -size * 0.04)
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: size * 0.32, weight: .semibold))
+                .foregroundStyle(CertShopPalette.gold)
+                .background(Circle().fill(Color.white).padding(-size * 0.03))
+                .offset(x: size * 0.17, y: size * 0.18)
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Cores fixas do cartão de compra: iguais no tema claro e no escuro, para
+/// ele chamar a atenção nos dois.
+enum CertShopPalette {
+    static let light = Color(red: 0.36, green: 0.58, blue: 0.43)
+    static let mid = Color(red: 0.24, green: 0.43, blue: 0.31)
+    static let deep = Color(red: 0.15, green: 0.30, blue: 0.21)
+    static let gold = Color(red: 0.86, green: 0.66, blue: 0.20)
+}
+
 struct CertShopBanner: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var shop: CertShopController
 
     var body: some View {
         if let state = shop.bannerState(certificates: app.certificates, current: app.currentCertificate) {
-            Button { shop.openShop() } label: {
-                HStack(spacing: 12) {
-                    XGlyph()
-                        .fill(Color.onGraphite)
-                        .frame(width: 20, height: 20)
-                        .frame(width: 44, height: 44)
-                        .background(Color.graphite, in: RoundedRectangle(cornerRadius: 44 * Radius.icon, style: .continuous))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title(state))
-                            .font(.callout.weight(.semibold))
-                            .foregroundStyle(Color.graphite)
-                        Text(subtitle(state))
-                            .font(.caption)
-                            .foregroundStyle(state == .failed ? Color.brick : Color.lead)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 8)
-                    PillButton(title: pill(state), filled: true) { shop.openShop() }
-                }
-                .padding(12)
-                .background(Color.surface, in: RoundedRectangle(cornerRadius: Radius.group, style: .continuous))
-                .contentShape(Rectangle())
+            if state == .offer {
+                CertShopOfferCard { shop.openShop() }
+            } else {
+                statusCard(state)
             }
-            .buttonStyle(.plain)
         }
+    }
+
+    /// Pedido em andamento: cartão compacto.
+    private func statusCard(_ state: CertShopController.BannerState) -> some View {
+        Button { shop.openShop() } label: {
+            HStack(spacing: 12) {
+                CertificateIcon(size: 44)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 44 * Radius.icon, style: .continuous)
+                            .strokeBorder(Color.hairline, lineWidth: 0.5)
+                    )
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title(state))
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(Color.graphite)
+                    Text(subtitle(state))
+                        .font(.caption)
+                        .foregroundStyle(state == .failed ? Color.brick : Color.lead)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                PillButton(title: pill(state), filled: true) { shop.openShop() }
+            }
+            .padding(12)
+            .background(Color.surface, in: RoundedRectangle(cornerRadius: Radius.group, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func title(_ state: CertShopController.BannerState) -> String {
@@ -639,7 +723,7 @@ struct CertShopBanner: View {
     private func subtitle(_ state: CertShopController.BannerState) -> String {
         let number = shop.order?.number ?? "—"
         switch state {
-        case .offer: return L.tr("shop.banner.offer.subtitle", CertPlan.cheapest.price)
+        case .offer: return L.tr("shop.banner.offer.tagline")
         case .awaitingPayment: return L.tr("shop.banner.awaiting.subtitle", number)
         case .working: return L.tr("shop.banner.working.subtitle", number)
         case .failed: return shop.importError ?? shop.order?.error ?? L.tr("shop.error.generic")
@@ -648,9 +732,108 @@ struct CertShopBanner: View {
 
     private func pill(_ state: CertShopController.BannerState) -> String {
         switch state {
-        case .offer: return L.tr("shop.banner.offer.pill")
         case .awaitingPayment: return L.tr("shop.banner.awaiting.pill")
-        case .working, .failed: return L.tr("shop.banner.view")
+        case .offer, .working, .failed: return L.tr("shop.banner.view")
         }
+    }
+}
+
+/// Oferta de certificado: cartão verde, ícone de certificado, vantagens e um
+/// botão grande. Um brilho passa por ele de tempos em tempos.
+struct CertShopOfferCard: View {
+    let action: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var shine = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    CertificateIcon(size: 52)
+                        .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(L.tr("shop.banner.offer.title"))
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                        Text(L.tr("shop.banner.offer.tagline"))
+                            .font(.footnote)
+                            .foregroundStyle(.white.opacity(0.82))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                // Quebra a linha em telas estreitas (iPhone SE).
+                ChipFlow(spacing: 6) {
+                    feature("bolt.fill", L.tr("shop.banner.offer.feature1"))
+                    feature("creditcard.fill", L.tr("shop.banner.offer.feature2"))
+                    feature("arrow.down.circle.fill", L.tr("shop.banner.offer.feature3"))
+                }
+
+                HStack(spacing: 6) {
+                    Text(L.tr("shop.banner.offer.cta", CertPlan.cheapest.price))
+                        .font(.subheadline.weight(.semibold))
+                    Image(systemName: "arrow.right")
+                        .font(.footnote.weight(.bold))
+                }
+                .foregroundStyle(CertShopPalette.deep)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 11)
+                .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .padding(14)
+            .background(
+                LinearGradient(
+                    colors: [CertShopPalette.light, CertShopPalette.mid, CertShopPalette.deep],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                )
+            )
+            .overlay(shineOverlay)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .shadow(color: CertShopPalette.deep.opacity(0.28), radius: 10, y: 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .task {
+            // Um brilho a cada 4 s enquanto o cartão está na tela.
+            guard !reduceMotion else { return }
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            while !Task.isCancelled {
+                shine = false
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                withAnimation(.easeInOut(duration: 1.3)) { shine = true }
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+            }
+        }
+    }
+
+    private func feature(_ symbol: String, _ text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(CertShopPalette.gold)
+            Text(text)
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Color.white.opacity(0.16), in: Capsule())
+    }
+
+    /// Faixa de brilho que atravessa o cartão.
+    private var shineOverlay: some View {
+        GeometryReader { geo in
+            LinearGradient(
+                colors: [.clear, .white.opacity(0.22), .clear],
+                startPoint: .leading, endPoint: .trailing
+            )
+            .frame(width: geo.size.width * 0.32, height: geo.size.height * 1.6)
+            .rotationEffect(.degrees(20))
+            .offset(x: shine ? geo.size.width * 1.15 : -geo.size.width * 0.5, y: -geo.size.height * 0.3)
+        }
+        .allowsHitTesting(false)
     }
 }

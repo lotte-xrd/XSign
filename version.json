@@ -1,6 +1,6 @@
 {
-  "version": "1.4.1",
-  "build": "7",
+  "version": "1.4.2",
+  "build": "8",
   "ipaUrl": "https://github.com/lotte-xrd/XSign/releases/download/latest/XSign-unsigned.ipa",
-  "notes": "XSign 1.4.1: na compra de certificado, o UDID agora é descoberto sozinho. Na primeira compra, toque em Comprar: o iPhone pede para instalar um perfil rápido, o XSign volta sozinho, preenche o UDID e já abre o pagamento. Depois disso o UDID fica guardado e não é pedido de novo. O plano mais barato agora se chama Instant Aleatório e, como os outros, vale 12 meses."
+  "notes": "XSign 1.4.2: o cartão para comprar certificado na aba Apps ficou novo, com ícone de certificado e os planos a partir de R$ 40. Na compra, o app agora pede seu e-mail, que vai no recibo do Pix ou do cartão e ajuda o suporte a achar sua compra. Ele fica salvo para a próxima vez."
 }
