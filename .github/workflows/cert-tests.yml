@@ -1,0 +1,46 @@
+name: Testes do leitor de certificados
+
+# Compila o leitor de .p12/.mobileprovision do app (Core/Services/CertificateFiles.swift)
+# como ferramenta de linha de comando no macOS e confere a senha, os certificados e a
+# escolha do par em .p12 gerados pelo OpenSSL 3 (formato novo, o do site) e no formato
+# antigo, inclusive BER, sem senha e com senha acentuada.
+
+on:
+  push:
+    branches: [ '**' ]
+  workflow_dispatch:
+
+jobs:
+  certs:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compilar a ferramenta de teste
+        run: |
+          swiftc -O \
+            Core/Services/CertificateFiles.swift \
+            Tests/CertSmoke/main.swift \
+            -o "$RUNNER_TEMP/certsmoke"
+
+      - name: Gerar certificados de teste
+        run: |
+          set -euo pipefail
+          PREFIX="$(brew --prefix openssl@3 2>/dev/null || true)"
+          if [ -z "$PREFIX" ] || [ ! -x "$PREFIX/bin/openssl" ]; then
+            brew install openssl@3
+            PREFIX="$(brew --prefix openssl@3)"
+          fi
+          LEGACY=""
+          if /usr/bin/openssl version | grep -qi libressl; then LEGACY=/usr/bin/openssl; fi
+          OPENSSL="$PREFIX/bin/openssl" LEGACY_OPENSSL="$LEGACY" bash Tests/CertSmoke/make_fixtures.sh "$RUNNER_TEMP/fx"
+
+      - name: Testar
+        run: |
+          set +e -o pipefail
+          "$RUNNER_TEMP/certsmoke" "$RUNNER_TEMP/fx" 2>&1 | tee "$RUNNER_TEMP/certs.log"
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=Leitor de certificados::$(grep -E 'FALHOU' "$RUNNER_TEMP/certs.log" | head -20 | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+            exit "$rc"
+          fi

@@ -167,6 +167,12 @@ struct Certificate: Identifiable, Codable, Hashable {
     var appleStatus: String? = nil
     var appleRevokedAt: Date? = nil
     var appleCheckedAt: Date? = nil
+    /// UUID do perfil (.mobileprovision). Serve para não duplicar o mesmo
+    /// certificado e para reconhecer o que instalou o próprio XSign.
+    var profileUUID: String? = nil
+
+    /// Sem .p12 no aparelho: o servidor acha o .p12 pelo perfil.
+    var isServerLinked: Bool { p12Path == CertificateService.serverMatchPath }
 
     var isRevokedByApple: Bool { appleStatus == "revoked" }
 

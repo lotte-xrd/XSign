@@ -12,6 +12,19 @@ struct AppUpdateInfo: Identifiable, Codable, Equatable {
     let notes: String?
 }
 
+/// Aviso simples (título + mensagem) do resultado de uma importação.
+struct ImportNotice: Identifiable, Equatable {
+    let id = UUID()
+    let title: String
+    let message: String
+}
+
+/// Arquivos de certificado que abrem a tela de importação já carregados.
+struct CertificateImportRequest: Identifiable, Equatable {
+    let id = UUID()
+    let urls: [URL]
+}
+
 /// Estado central do app: dados reais persistidos, serviços e preferências.
 @MainActor
 final class AppState: ObservableObject {
@@ -58,6 +71,12 @@ final class AppState: ObservableObject {
 
     @Published var downloads = DownloadManager()
     @Published var lastImportMessage: String?
+    /// Aviso do resultado de um arquivo aberto de fora (Arquivos, Safari, "Abrir com").
+    @Published var importNotice: ImportNotice?
+    /// Arquivos de certificado que precisam da tela de importação (senha ou arquivo faltando).
+    @Published var certificateImportRequest: CertificateImportRequest?
+    /// Perfil com que este XSign foi instalado (`embedded.mobileprovision`).
+    @Published var installedProfileUUID: String?
 
     // Estado da Splash de abertura (1), HUD de carregamento (2) e Auto-Update OTA
     @Published var isBootstrapping: Bool = true
@@ -136,11 +155,9 @@ final class AppState: ObservableObject {
         sourceApps = await Store.shared.load([SourceApp].self, from: "sourceAppsCache")
         ensureBuiltInXSign()
 
-        // Se nenhum certificado foi importado ainda, importa automaticamente o certificado que instalou o próprio XSign
-        if certificates.isEmpty, let embeddedCert = certificateService.importEmbeddedAppCertificate(makeActive: true) {
-            certificates.append(embeddedCert)
-            persist()
-        }
+        // Reconhece o certificado com que este XSign foi instalado (também quando
+        // já havia outros certificados de uma instalação anterior).
+        syncInstalledCertificate()
 
         // Atualiza status de validade dos certificados carregados
         for i in certificates.indices {
@@ -608,7 +625,13 @@ final class AppState: ObservableObject {
     func handle(url: URL) {
         if url.isFileURL {
             Task {
-                _ = try? await importResourcesWithHUD(urls: [url])
+                do {
+                    if let message = try await importResourcesWithHUD(urls: [url]), certificateImportRequest == nil {
+                        importNotice = ImportNotice(title: L.tr("import.done.title"), message: message)
+                    }
+                } catch {
+                    importNotice = ImportNotice(title: L.tr("import.failed.title"), message: error.localizedDescription)
+                }
             }
             return
         }
@@ -727,12 +750,20 @@ final class AppState: ObservableObject {
         }
 
         try? await Task.sleep(nanoseconds: 450_000_000)
+        // Arquivos de certificado escolhidos juntos (.p12 + .mobileprovision + .txt)
+        // são lidos juntos, para achar o par e a senha.
+        let certificateURLs = urls.filter { Self.certificateExtensions.contains($0.pathExtension.lowercased()) }
         var lastMsg: String?
-        for u in urls {
+        for u in urls where !certificateURLs.contains(u) {
             lastMsg = try importResource(url: u)
+        }
+        if !certificateURLs.isEmpty {
+            lastMsg = try importCertificateResources(urls: certificateURLs)
         }
         return lastMsg
     }
+
+    static let certificateExtensions: Set<String> = ["zip", "p12", "pfx", "mobileprovision", "provisionprofile"]
 
     @discardableResult
     func importResource(url: URL) throws -> String {
@@ -746,59 +777,8 @@ final class AppState: ObservableObject {
             selectedTab = .apps
             return "App importado: \(item.name)"
 
-        case "zip":
-            let cert = try certificateService.importFromZip(url: url, makeActive: certificates.isEmpty)
-            certificates.append(cert)
-            persist()
-            return "Certificado importado: \(cert.nickname)"
-
-        case "p12", "pfx":
-            Paths.ensure()
-            let stagedP12 = Paths.certs.appendingPathComponent("staged.p12")
-            try? FileManager.default.removeItem(at: stagedP12)
-            try FileManager.default.copyItem(at: url, to: stagedP12)
-            let stagedProv = Paths.certs.appendingPathComponent("staged.mobileprovision")
-            if FileManager.default.fileExists(atPath: stagedProv.path),
-               let p12Data = try? Data(contentsOf: stagedP12),
-               let provData = try? Data(contentsOf: stagedProv) {
-                let cert = try certificateService.saveCertificate(
-                    p12Data: p12Data,
-                    profileData: provData,
-                    password: "1",
-                    nickname: nil,
-                    makeActive: certificates.isEmpty
-                )
-                try? FileManager.default.removeItem(at: stagedP12)
-                try? FileManager.default.removeItem(at: stagedProv)
-                certificates.append(cert)
-                persist()
-                return "Certificado importado: \(cert.nickname)"
-            }
-            return "Arquivo .p12 carregado. Selecione também o .mobileprovision."
-
-        case "mobileprovision", "provisionprofile":
-            Paths.ensure()
-            let stagedProv = Paths.certs.appendingPathComponent("staged.mobileprovision")
-            try? FileManager.default.removeItem(at: stagedProv)
-            try FileManager.default.copyItem(at: url, to: stagedProv)
-            let stagedP12 = Paths.certs.appendingPathComponent("staged.p12")
-            if FileManager.default.fileExists(atPath: stagedP12.path),
-               let p12Data = try? Data(contentsOf: stagedP12),
-               let provData = try? Data(contentsOf: stagedProv) {
-                let cert = try certificateService.saveCertificate(
-                    p12Data: p12Data,
-                    profileData: provData,
-                    password: "1",
-                    nickname: nil,
-                    makeActive: certificates.isEmpty
-                )
-                try? FileManager.default.removeItem(at: stagedP12)
-                try? FileManager.default.removeItem(at: stagedProv)
-                certificates.append(cert)
-                persist()
-                return "Certificado importado: \(cert.nickname)"
-            }
-            return "Perfil carregado. Selecione também o .p12."
+        case "zip", "p12", "pfx", "mobileprovision", "provisionprofile":
+            return try importCertificateResources(urls: [url])
 
         case "deb", "dylib":
             Paths.ensure()
@@ -884,6 +864,173 @@ final class AppState: ObservableObject {
         apps.insert(item, at: 0)
         persist()
         return item
+    }
+
+    // MARK: - Certificados
+
+    /// Reconhece o certificado com que este XSign foi instalado. Antes isso só
+    /// acontecia com a lista vazia, então quem reinstalava o XSign com o próprio
+    /// certificado continuava vendo só os certificados antigos.
+    func syncInstalledCertificate() {
+        // Preenche o UUID do perfil nos certificados salvos antes da 1.4.3.
+        var migrated = false
+        for index in certificates.indices where certificates[index].profileUUID == nil {
+            if let uuid = certificateService.profileUUID(of: certificates[index]) {
+                certificates[index].profileUUID = uuid
+                migrated = true
+            }
+        }
+        defer { if migrated { persist() } }
+
+        guard var installed = certificateService.installedCertificate() else { return }
+        installedProfileUUID = installed.profile.uuid
+        let handledKey = "xsign.installedCertificate.handled"
+        let defaults = UserDefaults.standard
+
+        if let index = certificates.firstIndex(where: { cert in
+            if let uuid = installed.profile.uuid { return cert.profileUUID == uuid }
+            return (try? Data(contentsOf: Paths.resolve(cert.profilePath))) == installed.profileData
+        }) {
+            // Já está na lista. Se estava só "vinculado ao servidor" e o .p12 veio
+            // embutido nesta instalação, completa com o .p12.
+            if certificates[index].isServerLinked {
+                certificateService.loadBundledP12(into: &installed)
+                if installed.p12Data != nil,
+                   let upgraded = try? certificateService.saveInstalledCertificate(installed, makeActive: certificates[index].inUse) {
+                    replaceCertificate(at: index, with: upgraded)
+                    migrated = true
+                }
+            }
+            defaults.set(installed.key, forKey: handledKey)
+            return
+        }
+
+        // Se o usuário apagou de propósito este mesmo certificado, não traz de volta
+        // (a não ser que a lista tenha ficado vazia).
+        if defaults.string(forKey: handledKey) == installed.key, !certificates.isEmpty { return }
+        certificateService.loadBundledP12(into: &installed)
+        guard let cert = try? certificateService.saveInstalledCertificate(installed, makeActive: true) else { return }
+        for index in certificates.indices { certificates[index].inUse = false }
+        certificates.insert(cert, at: 0)
+        defaults.set(installed.key, forKey: handledKey)
+        migrated = true
+    }
+
+    /// Este é o certificado com que o XSign foi instalado?
+    func isInstalledCertificate(_ cert: Certificate) -> Bool {
+        guard let uuid = installedProfileUUID else { return false }
+        return cert.profileUUID == uuid
+    }
+
+    /// Importa o que foi encontrado nos arquivos e adiciona à lista (sem duplicar).
+    @discardableResult
+    func importCertificate(candidate: CertificateService.CertificateCandidate, password: String? = nil,
+                           nickname: String? = nil) throws -> Certificate {
+        let makeActive = !certificates.contains(where: { $0.inUse })
+        let cert = try certificateService.importCandidate(candidate, password: password, nickname: nickname, makeActive: makeActive)
+        return addCertificate(cert)
+    }
+
+    /// Adiciona um certificado. O mesmo perfil importado de novo substitui o antigo
+    /// (mantendo o uso e os apps vinculados) em vez de aparecer duas vezes.
+    @discardableResult
+    func addCertificate(_ cert: Certificate) -> Certificate {
+        let stored: Certificate
+        if let uuid = cert.profileUUID, let index = certificates.firstIndex(where: { $0.profileUUID == uuid }) {
+            stored = replaceCertificate(at: index, with: cert)
+        } else {
+            if cert.inUse {
+                for index in certificates.indices { certificates[index].inUse = false }
+            }
+            certificates.append(cert)
+            stored = cert
+        }
+        persist()
+        return stored
+    }
+
+    @discardableResult
+    private func replaceCertificate(at index: Int, with cert: Certificate) -> Certificate {
+        let old = certificates[index]
+        var updated = cert
+        updated.id = old.id
+        updated.inUse = old.inUse || cert.inUse
+        if cert.inUse {
+            for other in certificates.indices where other != index { certificates[other].inUse = false }
+        }
+        if old.p12Path != cert.p12Path { certificateService.removeFiles(of: old) }
+        certificates[index] = updated
+        return updated
+    }
+
+    /// .zip, .p12 e .mobileprovision abertos de fora ou pela aba Arquivos. Quando
+    /// falta a senha ou o outro arquivo, abre a tela de importação com o que chegou.
+    private func importCertificateResources(urls incoming: [URL]) throws -> String {
+        Paths.ensure()
+        let fm = FileManager.default
+        // .p12 e .mobileprovision soltos podem chegar um de cada vez ("Abrir com…"):
+        // ficam guardados aqui até o par ficar completo.
+        let staging = Paths.certs.appendingPathComponent("Staged", isDirectory: true)
+        try? fm.createDirectory(at: staging, withIntermediateDirectories: true)
+        let zipFolder = fm.temporaryDirectory.appendingPathComponent("cert-import-\(UUID().uuidString)", isDirectory: true)
+
+        var zips: [URL] = []
+        var stagedLoose = false
+        var addedNow = Set<String>()
+        for url in incoming {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let ext = url.pathExtension.lowercased()
+            if ext == "zip" {
+                try fm.createDirectory(at: zipFolder, withIntermediateDirectories: true)
+                let copy = zipFolder.appendingPathComponent(url.lastPathComponent)
+                try? fm.removeItem(at: copy)
+                try fm.copyItem(at: url, to: copy)
+                zips.append(copy)
+            } else {
+                // Um .p12 novo troca o .p12 guardado antes; um perfil novo troca o perfil.
+                let isP12 = ext == "p12" || ext == "pfx"
+                let existing = (try? fm.contentsOfDirectory(at: staging, includingPropertiesForKeys: nil)) ?? []
+                for file in existing where !addedNow.contains(file.lastPathComponent)
+                    && ["p12", "pfx"].contains(file.pathExtension.lowercased()) == isP12 {
+                    try? fm.removeItem(at: file)
+                }
+                let dest = staging.appendingPathComponent(url.lastPathComponent)
+                try? fm.removeItem(at: dest)
+                try fm.copyItem(at: url, to: dest)
+                addedNow.insert(dest.lastPathComponent)
+                stagedLoose = true
+            }
+        }
+
+        var urls = zips
+        if stagedLoose {
+            urls += (try? fm.contentsOfDirectory(at: staging, includingPropertiesForKeys: nil)) ?? []
+        }
+        let candidate = certificateService.collectCertificateFiles(urls)
+        do {
+            let cert = try importCertificate(candidate: candidate)
+            if stagedLoose { try? fm.removeItem(at: staging) }
+            try? fm.removeItem(at: zipFolder)
+            return L.tr("cert.imported", cert.nickname)
+        } catch let error as CertificateService.CertError where error.needsUserInput {
+            // A folha abre depois que a tela de onde veio o arquivo fechar.
+            let request = CertificateImportRequest(urls: urls)
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 700_000_000)
+                self?.certificateImportRequest = request
+            }
+            return L.tr("cert.import.needsInput")
+        }
+    }
+
+    /// Chamado quando a folha de importação termina: limpa o que ficou guardado.
+    func finishCertificateImportRequest(imported: Bool) {
+        if imported {
+            let staging = Paths.certs.appendingPathComponent("Staged", isDirectory: true)
+            try? FileManager.default.removeItem(at: staging)
+        }
+        certificateImportRequest = nil
     }
 
     // MARK: - Apps

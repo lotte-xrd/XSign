@@ -1,6 +1,6 @@
 {
-  "version": "1.4.2",
-  "build": "8",
+  "version": "1.4.3",
+  "build": "9",
   "ipaUrl": "https://github.com/lotte-xrd/XSign/releases/download/latest/XSign-unsigned.ipa",
-  "notes": "XSign 1.4.2: o cartão para comprar certificado na aba Apps ficou novo, com ícone de certificado e os planos a partir de R$ 40. Na compra, o app agora pede seu e-mail, que vai no recibo do Pix ou do cartão e ajuda o suporte a achar sua compra. Ele fica salvo para a próxima vez."
+  "notes": "XSign 1.4.3: o certificado com que você instalou o XSign agora aparece sozinho em Certificados, mesmo se já havia outros, e fica marcado como em uso. A importação de certificados foi refeita: o .zip, o .p12 e o .mobileprovision abrem nos iPhones com iOS 16 e 17 (antes dava \"senha incorreta\" com a senha certa), a senha é encontrada sozinha nos arquivos que vêm junto e, quando não é, o app pede para você digitar em vez de falhar."
 }

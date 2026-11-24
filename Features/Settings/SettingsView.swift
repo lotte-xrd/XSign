@@ -12,7 +12,9 @@ struct SettingsView: View {
             List {
                 if let cert = app.currentCertificate {
                     Section(L.tr("settings.currentCert")) {
-                        NavigationLink { CertificatesView() } label: { CertificateCard(cert: cert) }
+                        NavigationLink { CertificatesView() } label: {
+                            CertificateCard(cert: cert, installed: app.isInstalledCertificate(cert))
+                        }
                     }
                 }
 
@@ -161,6 +163,8 @@ struct SigningServerSettingsView: View {
 
 struct CertificateCard: View {
     let cert: Certificate
+    /// Foi com este certificado que o XSign aberto agora foi instalado.
+    var installed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -170,6 +174,16 @@ struct CertificateCard: View {
                 StatusBadge(status: cert.status)
             }
             Text("\(cert.type) · \(cert.teamID)").font(.caption2.monospaced()).foregroundStyle(.secondary)
+            if installed {
+                Label(L.tr("cert.installedWith"), systemImage: "checkmark.seal.fill")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.moss)
+            }
+            if cert.isServerLinked {
+                Label(L.tr("cert.serverLinked"), systemImage: "link")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             if cert.isRevokedByApple {
                 Label(
                     cert.appleRevokedAt.map { L.tr("cert.appleRevokedOn", $0.formatted(date: .abbreviated, time: .omitted)) }

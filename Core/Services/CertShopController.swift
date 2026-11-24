@@ -549,29 +549,30 @@ final class CertShopController: ObservableObject {
         addLog(.info, L.tr("shop.log.importing"))
         do {
             let planTitle = CertPlan.find(current.planID)?.title ?? ""
+            // O .p12 vem do nosso servidor com a senha certa: não confere de novo
+            // aqui para um detalhe do iOS não travar um certificado já pago.
             let cert = try app.certificateService.saveCertificate(
                 p12Data: p12,
                 profileData: profile,
                 password: payload.password,
                 nickname: "XSign · \(planTitle)",
-                makeActive: true
+                makeActive: true,
+                verify: false
             )
-            for index in app.certificates.indices { app.certificates[index].inUse = false }
-            app.certificates.append(cert)
-            app.persist()
+            let stored = app.addCertificate(cert)
 
-            current.importedCertificateID = cert.id
+            current.importedCertificateID = stored.id
             current.importSeconds = Date().timeIntervalSince(started)
             pending = current
             save()
             importError = nil
-            addLog(.success, L.tr("shop.log.imported", cert.nickname))
+            addLog(.success, L.tr("shop.log.imported", stored.nickname))
             Task { await app.refreshAppleRevocation(force: false) }
 
             if UIApplication.shared.applicationState == .active {
                 presentSuccess()
             } else {
-                notifyReady(name: cert.nickname)
+                notifyReady(name: stored.nickname)
             }
         } catch {
             importError = error.localizedDescription

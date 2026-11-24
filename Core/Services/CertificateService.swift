@@ -6,62 +6,49 @@ import ZIPFoundation
 /// Importa, valida e exporta certificados (.p12 + .mobileprovision, ou pacote .zip).
 struct CertificateService {
 
+    /// `p12Path` de um certificado sem .p12 no aparelho: o servidor acha o .p12 pelo perfil.
+    static let serverMatchPath = "SERVER_MATCH"
+
     enum CertError: LocalizedError {
         case badPassword, mismatch, profileUnreadable, missingFilesInZip
+        case passwordNeeded, notP12, missingP12, missingProfile
+
         var errorDescription: String? {
             switch self {
             case .badPassword:       return L.tr("cert.error.password")
             case .mismatch:          return L.tr("cert.error.mismatch")
             case .profileUnreadable: return L.tr("cert.error.profile")
-            case .missingFilesInZip: return "O arquivo .zip não contém um par .p12 e .mobileprovision."
+            case .missingFilesInZip: return L.tr("cert.error.missingFiles")
+            case .passwordNeeded:    return L.tr("cert.error.passwordNeeded")
+            case .notP12:            return L.tr("cert.error.notP12")
+            case .missingP12:        return L.tr("cert.error.missingP12")
+            case .missingProfile:    return L.tr("cert.error.missingProfile")
+            }
+        }
+
+        /// Erros que a tela de importação resolve pedindo algo ao usuário
+        /// (a senha ou o arquivo que falta).
+        var needsUserInput: Bool {
+            switch self {
+            case .passwordNeeded, .missingP12, .missingProfile, .badPassword: return true
+            default: return false
             }
         }
     }
 
-    struct ProfileInfo {
-        var name: String?
-        var teamID: String
-        var teamName: String?
-        var appID: String?
-        var type: String
-        var issuedAt: Date?
-        var expiresAt: Date?
-        var devices: [String]
-        var entitlementsCount: Int
-    }
+    typealias ProfileInfo = ProvisioningProfileInfo
+    typealias CertificateCandidate = CertificateScanResult
 
-    /// Valida a senha abrindo o .p12 via Security framework.
+    /// Confere a senha do .p12. Funciona também com o formato novo do OpenSSL 3
+    /// (AES-256), que o `SecPKCS12Import` do iOS 17 e anteriores não abre.
     func validateP12(data: Data, password: String) -> Bool {
-        let options: [String: Any] = [kSecImportExportPassphrase as String: password]
-        var items: CFArray?
-        let status = SecPKCS12Import(data as CFData, options as CFDictionary, &items)
-        return status == errSecSuccess
+        CertificateScanner.validate(data, password: password)
     }
 
     /// Lê o plist embutido no .mobileprovision (dentro do envelope CMS/PKCS#7).
     func readProfile(data: Data) throws -> ProfileInfo {
-        guard let plist = Self.extractPlist(from: data),
-              let dict = try? PropertyListSerialization.propertyList(from: plist, options: [], format: nil) as? [String: Any]
-        else { throw CertError.profileUnreadable }
-
-        let entitlements = dict["Entitlements"] as? [String: Any]
-        let appID = entitlements?["application-identifier"] as? String
-        let teamID = (dict["TeamIdentifier"] as? [String])?.first
-            ?? appID?.split(separator: ".").first.map(String.init) ?? "—"
-        let type = (dict["ProvisionsAllDevices"] as? Bool == true) ? "In-House (Enterprise)"
-            : (dict["ProvisionedDevices"] != nil ? "Apple Development / Ad-Hoc" : "App Store Distribution")
-
-        return ProfileInfo(
-            name: dict["Name"] as? String,
-            teamID: teamID,
-            teamName: dict["TeamName"] as? String,
-            appID: appID,
-            type: type,
-            issuedAt: dict["CreationDate"] as? Date,
-            expiresAt: dict["ExpirationDate"] as? Date,
-            devices: dict["ProvisionedDevices"] as? [String] ?? [],
-            entitlementsCount: entitlements?.count ?? 0
-        )
+        guard let info = ProvisioningProfileInfo.read(data) else { throw CertError.profileUnreadable }
+        return info
     }
 
     /// Entitlements do perfil de provisionamento de um certificado já importado.
@@ -71,18 +58,30 @@ struct CertificateService {
     }
 
     func entitlements(fromProfile data: Data) -> [String: Any] {
-        guard let plist = Self.extractPlist(from: data),
-              let dict = try? PropertyListSerialization.propertyList(from: plist, options: [], format: nil) as? [String: Any]
-        else { return [:] }
-        return dict["Entitlements"] as? [String: Any] ?? [:]
+        ProvisioningProfileInfo.plist(from: data)?["Entitlements"] as? [String: Any] ?? [:]
+    }
+
+    /// UUID do perfil de um certificado (do modelo ou lido do arquivo).
+    func profileUUID(of cert: Certificate) -> String? {
+        if let uuid = cert.profileUUID { return uuid }
+        guard let data = try? Data(contentsOf: Paths.resolve(cert.profilePath)) else { return nil }
+        return ProvisioningProfileInfo.read(data)?.uuid
     }
 
     /// Salva o par .p12 + .mobileprovision em `Documents/Certificates/<id>/` e retorna o `Certificate`.
-    func saveCertificate(p12Data: Data, profileData: Data, password: String, nickname: String?, makeActive: Bool) throws -> Certificate {
-        guard validateP12(data: p12Data, password: password) else {
-            throw CertError.badPassword
-        }
+    /// `verify: false` para arquivos que vêm do nosso servidor (compra e certificado
+    /// embutido no XSign): a senha já foi usada lá e não pode travar a importação.
+    func saveCertificate(p12Data: Data, profileData: Data, password: String, nickname: String?,
+                         makeActive: Bool, verify: Bool = true) throws -> Certificate {
         let info = try readProfile(data: profileData)
+        if verify {
+            guard validateP12(data: p12Data, password: password) else {
+                throw PKCS12File(data: p12Data) == nil ? CertError.notP12 : CertError.badPassword
+            }
+            if CertificateScanner.p12(p12Data, password: password, matchesProfile: info) == false {
+                throw CertError.mismatch
+            }
+        }
         let certID = UUID()
         let folder = Paths.certs.appendingPathComponent(certID.uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -117,105 +116,51 @@ struct CertificateService {
             password: password,
             status: status(expiresAt: info.expiresAt),
             checkedAt: Date(),
-            inUse: makeActive
+            inUse: makeActive,
+            profileUUID: info.uuid
         )
+    }
+
+    /// Importa o que foi encontrado nos arquivos. `password` é a que o usuário
+    /// digitou; sem ela vale a senha descoberta sozinha.
+    func importCandidate(_ candidate: CertificateCandidate, password: String? = nil, nickname: String? = nil,
+                         makeActive: Bool) throws -> Certificate {
+        guard candidate.p12Data != nil || candidate.profileData != nil else { throw CertError.missingFilesInZip }
+        guard let p12 = candidate.p12Data else { throw CertError.missingP12 }
+        guard let profile = candidate.profileData else { throw CertError.missingProfile }
+        if candidate.p12Unreadable && password == nil { throw CertError.notP12 }
+        guard let pass = password ?? candidate.foundPassword else { throw CertError.passwordNeeded }
+        return try saveCertificate(p12Data: p12, profileData: profile, password: pass, nickname: nickname, makeActive: makeActive)
     }
 
     /// Importa um pacote `.zip` de certificado (como o baixado de `exploiting-ios.online`).
-    /// Procura `.p12`, `.mobileprovision` e tenta descobrir a senha em arquivos `.txt` ou testando `"1"`.
     func importFromZip(url: URL, makeActive: Bool) throws -> Certificate {
-        guard let archive = Archive(url: url, accessMode: .read) else {
-            throw CertError.missingFilesInZip
-        }
-
-        var p12Data: Data?
-        var provData: Data?
-        var textCandidates: [String] = []
-
-        for entry in archive {
-            let lower = entry.path.lowercased()
-            if lower.contains("__macosx") { continue }
-            if lower.hasSuffix(".p12") || lower.hasSuffix(".pfx") {
-                p12Data = try Self.extractEntry(entry, from: archive)
-            } else if lower.hasSuffix(".mobileprovision") {
-                provData = try Self.extractEntry(entry, from: archive)
-            } else if lower.hasSuffix(".txt") {
-                if let d = try? Self.extractEntry(entry, from: archive),
-                   let str = String(data: d, encoding: .utf8) ?? String(data: d, encoding: .isoLatin1) {
-                    textCandidates.append(str)
-                }
-            }
-        }
-
-        guard let p12 = p12Data, let prov = provData else {
-            throw CertError.missingFilesInZip
-        }
-
-        // Descobrir a senha (1º pelos .txt do zip, 2º testando senhas padrão como "1", "1234", "")
-        var candidates: [String] = []
-        for txt in textCandidates {
-            for line in txt.components(separatedBy: .newlines) {
-                if let colon = line.firstIndex(of: ":") {
-                    let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !value.isEmpty { candidates.append(value) }
-                }
-                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty && trimmed.count <= 64 { candidates.append(trimmed) }
-            }
-        }
-        candidates.append(contentsOf: ["1", "1234", "123456", "password", "apple", ""])
-
-        let matchedPassword = candidates.first(where: { validateP12(data: p12, password: $0) }) ?? "1"
-        return try saveCertificate(
-            p12Data: p12,
-            profileData: prov,
-            password: matchedPassword,
-            nickname: nil,
-            makeActive: makeActive
-        )
+        try importCandidate(collectCertificateFiles([url]), makeActive: makeActive)
     }
 
-    // MARK: - Importar de outros assinadores (ESign, KSign) ou de arquivos soltos
+    // MARK: - Ler arquivos soltos, pastas e .zip
 
-    /// O que foi encontrado nos arquivos escolhidos.
-    struct CertificateCandidate {
-        var p12Data: Data?
-        var p12Name: String?
-        var profileData: Data?
-        var profileName: String?
-        var passwordHints: [String] = []
-        var foundPassword: String?
-        var profile: ProfileInfo?
-    }
-
-    /// Lê arquivos soltos, pastas e .zip, separa .p12 / .mobileprovision e tenta
-    /// descobrir a senha em .txt / .json / .plist que vierem junto.
+    /// Lê arquivos soltos, pastas e .zip (inclusive .zip dentro de .zip), separa
+    /// .p12 / .mobileprovision, escolhe o par que combina e descobre a senha em
+    /// .txt / .json / .plist que vierem junto (ou testando as senhas comuns).
     func collectCertificateFiles(_ urls: [URL]) -> CertificateCandidate {
-        var candidate = CertificateCandidate()
-        var strong: [String] = []
-        var weak: [String] = []
+        CertificateScanner.scan(Self.entries(from: urls))
+    }
+
+    static func entries(from urls: [URL]) -> [CertificateFileEntry] {
+        var entries: [CertificateFileEntry] = []
         let maxSize: UInt64 = 20 * 1024 * 1024
 
-        func consume(name: String, data: Data) {
-            let base = (name as NSString).lastPathComponent
-            let lower = base.lowercased()
-            if name.lowercased().contains("__macosx") || base.hasPrefix("._") { return }
-            if lower.hasSuffix(".p12") || lower.hasSuffix(".pfx") {
-                if candidate.p12Data == nil {
-                    candidate.p12Data = data
-                    candidate.p12Name = base
+        func addZip(_ archive: Archive, prefix: String, depth: Int) {
+            for entry in archive where entry.type == .file && entry.uncompressedSize < maxSize {
+                guard entries.count < 400, let data = try? extractEntry(entry, from: archive) else { continue }
+                let name = prefix + entry.path
+                if name.lowercased().hasSuffix(".zip"), depth < 2,
+                   let inner = Archive(data: data, accessMode: .read) {
+                    addZip(inner, prefix: name + "/", depth: depth + 1)
+                } else {
+                    entries.append(CertificateFileEntry(name: name, data: data))
                 }
-            } else if lower.hasSuffix(".mobileprovision") || lower.hasSuffix(".provisionprofile") {
-                if candidate.profileData == nil, let info = try? readProfile(data: data) {
-                    candidate.profileData = data
-                    candidate.profileName = base
-                    candidate.profile = info
-                }
-            } else if lower.hasSuffix(".txt") || lower.hasSuffix(".json") || lower.hasSuffix(".plist")
-                        || lower.hasSuffix(".md") || lower.hasSuffix(".rtf") || !lower.contains(".") {
-                let hints = Self.passwordHints(from: data)
-                strong.append(contentsOf: hints.strong)
-                weak.append(contentsOf: hints.weak)
             }
         }
 
@@ -228,138 +173,91 @@ struct CertificateService {
 
             if isDirectory.boolValue {
                 let walker = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey])
-                while let file = walker?.nextObject() as? URL {
+                while let file = walker?.nextObject() as? URL, entries.count < 400 {
                     let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
                     guard values?.isRegularFile == true, UInt64(values?.fileSize ?? 0) < maxSize,
                           let data = try? Data(contentsOf: file) else { continue }
-                    consume(name: file.path, data: data)
-                }
-            } else if url.pathExtension.lowercased() == "zip", let archive = Archive(url: url, accessMode: .read) {
-                for entry in archive where entry.type == .file && entry.uncompressedSize < maxSize {
-                    if let data = try? Self.extractEntry(entry, from: archive) {
-                        consume(name: entry.path, data: data)
+                    let name = String(file.path.dropFirst(url.path.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                    if file.pathExtension.lowercased() == "zip", let archive = Archive(data: data, accessMode: .read) {
+                        addZip(archive, prefix: name + "/", depth: 1)
+                    } else {
+                        entries.append(CertificateFileEntry(name: name, data: data))
                     }
                 }
-            } else if let data = try? Data(contentsOf: url) {
-                consume(name: url.lastPathComponent, data: data)
+            } else if let data = try? Data(contentsOf: url), UInt64(data.count) < 200 * 1024 * 1024 {
+                // .zip pelo conteúdo (PK), mesmo com outra extensão.
+                if data.starts(with: [0x50, 0x4B, 0x03, 0x04]) || url.pathExtension.lowercased() == "zip",
+                   let archive = Archive(data: data, accessMode: .read) {
+                    addZip(archive, prefix: "", depth: 0)
+                } else if UInt64(data.count) < maxSize {
+                    entries.append(CertificateFileEntry(name: url.lastPathComponent, data: data))
+                }
             }
         }
-
-        var seen = Set<String>()
-        let defaults = ["", "1", "1234", "123456", "123", "0000", "password", "apple"]
-        candidate.passwordHints = (strong + weak + defaults).filter { seen.insert($0).inserted }.prefix(48).map { $0 }
-        if let p12 = candidate.p12Data {
-            candidate.foundPassword = candidate.passwordHints.first { validateP12(data: p12, password: $0) }
-        }
-        return candidate
+        return entries
     }
 
-    /// Possíveis senhas num arquivo de texto/JSON/plist. `strong` = valores de chaves
-    /// com nome de senha; `weak` = demais linhas/valores curtos.
+    /// Possíveis senhas num arquivo de texto/JSON/plist.
     static func passwordHints(from data: Data) -> (strong: [String], weak: [String]) {
-        var strong: [String] = []
-        var weak: [String] = []
-        let passwordWords = ["pass", "pwd", "senha", "contrase", "clave", "密码", "mật khẩu", "mat khau"]
-
-        func isPasswordKey(_ key: String) -> Bool {
-            let lower = key.lowercased()
-            return passwordWords.contains { lower.contains($0) }
-        }
-
-        func walk(_ value: Any, key: String?) {
-            if let dict = value as? [String: Any] {
-                for (k, v) in dict { walk(v, key: k) }
-            } else if let array = value as? [Any] {
-                for v in array { walk(v, key: key) }
-            } else if let s = value as? String {
-                let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard trimmed.count <= 64 else { return }
-                if let key, isPasswordKey(key) { strong.append(trimmed) } else if !trimmed.isEmpty { weak.append(trimmed) }
-            } else if let n = value as? NSNumber, let key, isPasswordKey(key) {
-                strong.append(n.stringValue)
-            }
-        }
-
-        if let json = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) {
-            walk(json, key: nil)
-            return (strong, weak)
-        }
-        if let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
-           !(plist is String) {
-            walk(plist, key: nil)
-            return (strong, weak)
-        }
-
-        let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) ?? ""
-        for rawLine in text.components(separatedBy: .newlines) {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !line.isEmpty, line.count <= 120 else { continue }
-            if let sep = line.firstIndex(where: { $0 == ":" || $0 == "=" || $0 == "：" }) {
-                let key = String(line[..<sep])
-                let value = line[line.index(after: sep)...].trimmingCharacters(in: .whitespacesAndNewlines)
-                if !value.isEmpty && value.count <= 64 {
-                    if isPasswordKey(key) { strong.append(value) } else { weak.append(value) }
-                }
-            }
-            if line.count <= 64 { weak.append(line) }
-        }
-        return (strong, weak)
+        CertificateScanner.passwordHints(from: data)
     }
 
-    /// Detecta e importa automaticamente o certificado com o qual o próprio XSign foi instalado!
-    /// 1) Procura primeiro em `Bundle.main/BundledCert` (caso o servidor tenha embutido `.p12` + `.mobileprovision`).
-    /// 2) Caso contrário, lê o `embedded.mobileprovision` que o `zsign` coloca nativamente em `Payload/XSign.app/embedded.mobileprovision`
-    ///    e cria o certificado vinculado ao servidor (`p12Path = "SERVER_MATCH"`).
-    func importEmbeddedAppCertificate(makeActive: Bool = true) -> Certificate? {
-        if let resourceURL = Bundle.main.resourceURL {
-            let bundledDir = resourceURL.appendingPathComponent("BundledCert", isDirectory: true)
-            let searchDirs = [bundledDir, resourceURL]
+    // MARK: - Certificado com que o próprio XSign foi instalado
 
-            for dir in searchDirs {
-                guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
-                if let zipFile = files.first(where: { $0.pathExtension.lowercased() == "zip" }),
-                   let cert = try? importFromZip(url: zipFile, makeActive: makeActive) {
-                    return cert
-                }
-                if let p12File = files.first(where: { ["p12", "pfx"].contains($0.pathExtension.lowercased()) }),
-                   let provFile = files.first(where: { $0.pathExtension.lowercased() == "mobileprovision" && $0.lastPathComponent != "embedded.mobileprovision" })
-                        ?? files.first(where: { $0.pathExtension.lowercased() == "mobileprovision" }),
-                   let p12Data = try? Data(contentsOf: p12File),
-                   let provData = try? Data(contentsOf: provFile) {
-                    var passCandidates = ["1", "1234", "123456", "password", ""]
-                    if let txtFile = files.first(where: { $0.pathExtension.lowercased() == "txt" }),
-                       let txt = try? String(contentsOf: txtFile, encoding: .utf8) {
-                        let lines = txt.components(separatedBy: .newlines)
-                            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                            .filter { !$0.isEmpty }
-                        passCandidates.insert(contentsOf: lines, at: 0)
-                    }
-                    let pass = passCandidates.first(where: { validateP12(data: p12Data, password: $0) }) ?? "1"
-                    if let cert = try? saveCertificate(p12Data: p12Data, profileData: provData, password: pass, nickname: nil, makeActive: makeActive) {
-                        return cert
-                    }
-                }
-            }
-        }
+    /// O certificado que assinou este XSign: o perfil `embedded.mobileprovision`
+    /// e, quando o servidor embutiu, o .p12 em `BundledCert/`.
+    struct InstalledCertificate {
+        var profileData: Data
+        var profile: ProfileInfo
+        var p12Data: Data?
+        var password: String?
 
-        // Fallback universal: lê o `embedded.mobileprovision` que o zsign sempre embute ao assinar o XSign
+        /// Identifica o perfil mesmo sem UUID.
+        var key: String { profile.uuid ?? "\(profile.teamID)-\(profileData.count)" }
+    }
+
+    /// Só o perfil; o .p12 embutido é lido depois, com `loadBundledP12`, quando precisa.
+    func installedCertificate() -> InstalledCertificate? {
         guard let embeddedURL = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
-              let provData = try? Data(contentsOf: embeddedURL),
-              let info = try? readProfile(data: provData) else {
-            return nil
+              let profileData = try? Data(contentsOf: embeddedURL),
+              let profile = ProvisioningProfileInfo.read(profileData) else { return nil }
+        return InstalledCertificate(profileData: profileData, profile: profile)
+    }
+
+    /// Lê o .p12 que o servidor embutiu em `BundledCert/` (com `password.txt`).
+    func loadBundledP12(into installed: inout InstalledCertificate) {
+        guard installed.p12Data == nil, let resources = Bundle.main.resourceURL else { return }
+        let bundled = resources.appendingPathComponent("BundledCert", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: bundled.path) else { return }
+        let found = collectCertificateFiles([bundled])
+        guard let p12 = found.p12Data else { return }
+        installed.p12Data = p12
+        // Se nem a senha do password.txt nem as comuns conferirem aqui, usa a do
+        // arquivo assim mesmo: ela foi a usada pelo servidor, que é quem assina.
+        installed.password = found.foundPassword
+            ?? found.passwordHints.first(where: { !$0.isEmpty })
+            ?? "1"
+    }
+
+    /// Cria o `Certificate` do XSign instalado: com o .p12 embutido quando há,
+    /// senão vinculado ao servidor (o servidor acha o .p12 pelo perfil).
+    func saveInstalledCertificate(_ installed: InstalledCertificate, makeActive: Bool) throws -> Certificate {
+        if let p12 = installed.p12Data {
+            return try saveCertificate(p12Data: p12, profileData: installed.profileData,
+                                       password: installed.password ?? "1", nickname: nil,
+                                       makeActive: makeActive, verify: false)
         }
 
+        let info = installed.profile
         let certID = UUID()
         let folder = Paths.certs.appendingPathComponent(certID.uuidString, isDirectory: true)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let provURL = folder.appendingPathComponent("profile.mobileprovision")
-        try? provData.write(to: provURL, options: .atomic)
-
-        let resolvedNick = info.teamName ?? info.name ?? "Certificado \(info.teamID)"
+        try installed.profileData.write(to: provURL, options: .atomic)
 
         return Certificate(
             id: certID,
-            nickname: resolvedNick,
+            nickname: info.teamName ?? info.name ?? "Certificado \(info.teamID)",
             teamID: info.teamID,
             teamName: info.teamName,
             type: info.type,
@@ -368,14 +266,24 @@ struct CertificateService {
             expiresAt: info.expiresAt,
             devices: info.devices,
             entitlementsCount: info.entitlementsCount,
-            p12Path: "SERVER_MATCH",
+            p12Path: Self.serverMatchPath,
             profilePath: Paths.relative(provURL),
             keychainKey: "cert.password.\(certID.uuidString)",
             password: "1",
             status: status(expiresAt: info.expiresAt),
             checkedAt: Date(),
-            inUse: makeActive
+            inUse: makeActive,
+            profileUUID: info.uuid
         )
+    }
+
+    /// Apaga os arquivos e a senha de um certificado.
+    func removeFiles(of cert: Certificate) {
+        KeychainHelper.delete(key: cert.keychainKey)
+        let folder = Paths.resolve(cert.profilePath).deletingLastPathComponent()
+        if folder.path.contains("/Certificates/"), folder.lastPathComponent != "Certificates" {
+            try? FileManager.default.removeItem(at: folder)
+        }
     }
 
     /// Exporta um certificado em `.zip` para compartilhamento.
@@ -396,7 +304,7 @@ struct CertificateService {
         let passText = "Senha do certificado (P12) / Password: \(pass)\r\nTeam ID: \(cert.teamID)\r\n"
         try passText.data(using: .utf8)?.write(to: tempDir.appendingPathComponent("SENHA-PASSWORD.txt"))
 
-        let safeName = cert.nickname.replacingOccurrences(of: " ", with: "-")
+        let safeName = cert.nickname.replacingOccurrences(of: " ", with: "-").replacingOccurrences(of: "/", with: "-")
         let zipURL = FileManager.default.temporaryDirectory.appendingPathComponent("XSign-\(safeName).zip")
         try? FileManager.default.removeItem(at: zipURL)
         try FileManager.default.zipItem(at: tempDir, to: zipURL, shouldKeepParent: false)
@@ -421,18 +329,18 @@ struct CertificateService {
     }
 
     /// Certificado público (DER) de dentro do .p12. A chave privada não sai daqui.
+    /// Sem .p12 no aparelho (certificado vinculado ao servidor), usa o do perfil
+    /// quando ele tem um só.
     func publicCertificateDER(for cert: Certificate) -> Data? {
-        guard let p12Data = try? Data(contentsOf: Paths.resolve(cert.p12Path)), !p12Data.isEmpty else { return nil }
-        let password = KeychainHelper.read(key: cert.keychainKey) ?? cert.password
-        let options: [String: Any] = [kSecImportExportPassphrase as String: password]
-        var items: CFArray?
-        guard SecPKCS12Import(p12Data as CFData, options as CFDictionary, &items) == errSecSuccess,
-              let first = (items as? [[String: Any]])?.first,
-              let identityRef = first[kSecImportItemIdentity as String] else { return nil }
-        let identity = identityRef as! SecIdentity
-        var certificate: SecCertificate?
-        guard SecIdentityCopyCertificate(identity, &certificate) == errSecSuccess, let certificate else { return nil }
-        return SecCertificateCopyData(certificate) as Data
+        if cert.p12Path != Self.serverMatchPath,
+           let p12Data = try? Data(contentsOf: Paths.resolve(cert.p12Path)), !p12Data.isEmpty {
+            let password = KeychainHelper.read(key: cert.keychainKey) ?? cert.password
+            if let der = CertificateScanner.certificates(of: p12Data, password: password).first { return der }
+        }
+        guard let profileData = try? Data(contentsOf: Paths.resolve(cert.profilePath)),
+              let profile = ProvisioningProfileInfo.read(profileData),
+              profile.certificates.count == 1 else { return nil }
+        return profile.certificates.first
     }
 
     /// Pergunta ao servidor (que consulta o OCSP da Apple) se o certificado foi
@@ -460,16 +368,11 @@ struct CertificateService {
         )
     }
 
-    /// Revalida o certificado lendo os arquivos em disco e conferindo a senha e data.
+    /// Revalida o status pelas datas. A revogação de verdade vem da Apple (OCSP,
+    /// `appleRevocationStatus`). Antes, um .p12 que o iOS não conseguia abrir
+    /// (formato novo do OpenSSL 3) aparecia aqui como "revogado".
     func checkRevocation(for cert: Certificate) async -> CertStatus {
-        let p12URL = Paths.resolve(cert.p12Path)
-        let pass = KeychainHelper.read(key: cert.keychainKey) ?? cert.password
-        if let p12Data = try? Data(contentsOf: p12URL) {
-            if !validateP12(data: p12Data, password: pass) {
-                return .revoked
-            }
-        }
-        return status(expiresAt: cert.expiresAt)
+        status(expiresAt: cert.expiresAt)
     }
 
     // MARK: - util
@@ -480,15 +383,6 @@ struct CertificateService {
             buffer.append(chunk)
         })
         return buffer
-    }
-
-    private static func extractPlist(from data: Data) -> Data? {
-        guard let text = String(data: data, encoding: .isoLatin1) ?? String(data: data, encoding: .ascii),
-              let start = text.range(of: "<?xml"),
-              let end = text.range(of: "</plist>")
-        else { return nil }
-        let slice = text[start.lowerBound..<end.upperBound]
-        return slice.data(using: .isoLatin1)
     }
 }
 

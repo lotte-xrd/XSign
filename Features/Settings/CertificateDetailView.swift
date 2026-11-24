@@ -96,11 +96,8 @@ struct CertificateDetailView: View {
     }
 
     private func delete() {
-        KeychainHelper.delete(key: cert.keychainKey)
-        let folder = Paths.resolve(cert.p12Path).deletingLastPathComponent()
-        if folder.path.contains("/Certificates/") {
-            try? FileManager.default.removeItem(at: folder)
-        }
+        // Pela pasta do perfil: certificados vinculados ao servidor não têm .p12.
+        app.certificateService.removeFiles(of: cert)
         app.certificates.removeAll { $0.id == cert.id }
         if !app.certificates.isEmpty && !app.certificates.contains(where: { $0.inUse }) {
             app.certificates[0].inUse = true
