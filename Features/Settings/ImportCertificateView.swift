@@ -18,6 +18,9 @@ struct ImportCertificateView: View {
     @State private var nickname = ""
     @State private var profile: CertificateService.ProfileInfo?
     @State private var errorMessage: String?
+    /// A senha do .p12 foi descoberta sozinha.
+    @State private var passwordFound = false
+    @State private var working = false
 
     var body: some View {
         NavigationStack {
@@ -88,7 +91,12 @@ struct ImportCertificateView: View {
                 } header: {
                     Text(L.tr("importcert.data"))
                 } footer: {
-                    Text(L.tr("importcert.keychain"))
+                    if passwordFound {
+                        Label(L.tr("certimport.password.found"), systemImage: "key.fill")
+                            .foregroundStyle(Color.moss)
+                    } else {
+                        Text(L.tr("importcert.keychain"))
+                    }
                 }
 
                 if let errorMessage {
@@ -121,8 +129,13 @@ struct ImportCertificateView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L.tr("common.cancel")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(L.tr("importcert.import")) { importCert() }
-                        .disabled(!(p12Data != nil && profileData != nil && !password.isEmpty))
+                    if working {
+                        ProgressView()
+                    } else {
+                        // Senha vazia é válida: há .p12 sem senha.
+                        Button(L.tr("importcert.import")) { importCert() }
+                            .disabled(!(p12Data != nil && profileData != nil))
+                    }
                 }
             }
             .sheet(isPresented: $showPicker) {
@@ -136,46 +149,81 @@ struct ImportCertificateView: View {
     private func handlePickedURLs(_ urls: [URL]) {
         errorMessage = nil
         guard let url = urls.first else { return }
-
         let ext = url.pathExtension.lowercased()
+        let service = app.certificateService
+        let looseExts = ["p12", "pfx", "mobileprovision", "provisionprofile"]
 
-        if ext == "zip" || (pickerKind == .zip && ext != "p12" && ext != "mobileprovision") {
-            do {
-                let cert = try app.certificateService.importFromZip(url: url, makeActive: app.certificates.isEmpty)
-                app.certificates.append(cert)
-                app.persist()
-                dismiss()
-                return
-            } catch {
-                errorMessage = error.localizedDescription
-                return
+        // .zip (ou qualquer pacote): lê tudo, escolhe o par que combina e procura a senha.
+        if ext == "zip" || (pickerKind == .zip && !looseExts.contains(ext)) {
+            working = true
+            Task {
+                let found = await Task.detached(priority: .userInitiated) {
+                    service.collectCertificateFiles([url])
+                }.value
+                working = false
+                apply(found)
+                if !found.isComplete {
+                    errorMessage = found.p12Data == nil && found.profileData == nil ? L.tr("cert.error.missingFiles")
+                        : found.p12Data == nil ? L.tr("cert.error.missingP12") : L.tr("cert.error.missingProfile")
+                } else if found.pairMatches == false {
+                    errorMessage = L.tr("cert.error.mismatch")
+                } else if found.foundPassword != nil {
+                    importCert()
+                } else {
+                    errorMessage = L.tr("cert.error.passwordNeeded")
+                }
             }
-        }
-
-        guard let data = try? Data(contentsOf: url), !data.isEmpty else {
-            errorMessage = L.tr("cert.error.profile")
             return
         }
 
-        let isProvision = ext == "mobileprovision"
-            || ext == "provisionprofile"
-            || (try? app.certificateService.readProfile(data: data)) != nil
+        guard let data = try? Data(contentsOf: url), !data.isEmpty else {
+            errorMessage = pickerKind == .profile ? L.tr("cert.error.profile") : L.tr("cert.error.notP12")
+            return
+        }
 
-        if pickerKind == .profile || isProvision {
-            do {
-                let parsed = try app.certificateService.readProfile(data: data)
-                profileData = data
-                profileFileName = url.lastPathComponent
-                profile = parsed
-                if nickname.isEmpty, let t = parsed.teamName ?? parsed.name {
-                    nickname = t
-                }
-            } catch {
-                errorMessage = error.localizedDescription
+        let isP12 = PKCS12File(data: data) != nil || ext == "p12" || ext == "pfx"
+        if let parsed = try? service.readProfile(data: data), !isP12 {
+            profileData = data
+            profileFileName = url.lastPathComponent
+            profile = parsed
+            if nickname.isEmpty, let t = parsed.teamName ?? parsed.name {
+                nickname = t
             }
-        } else {
+        } else if pickerKind == .profile && !isP12 {
+            errorMessage = L.tr("cert.error.profile")
+        } else if isP12 {
             p12Data = data
             p12FileName = url.lastPathComponent
+            // Tenta as senhas comuns ("1", vazia…) para o usuário não precisar digitar.
+            let file = PKCS12File(data: data)
+            if let found = CertificateScanner.commonPasswords.first(where: {
+                CertificateScanner.quickPasswordCheck(data, file: file, password: $0)
+            }) {
+                password = found
+                passwordFound = true
+            }
+        } else {
+            errorMessage = L.tr("cert.error.notP12")
+        }
+    }
+
+    /// Preenche a tela com o que foi achado num .zip.
+    private func apply(_ found: CertificateService.CertificateCandidate) {
+        if let data = found.p12Data {
+            p12Data = data
+            p12FileName = found.p12Name
+        }
+        if let data = found.profileData {
+            profileData = data
+            profileFileName = found.profileName
+            profile = found.profile
+            if nickname.isEmpty, let p = found.profile {
+                nickname = p.teamName ?? p.name ?? ""
+            }
+        }
+        if let pass = found.foundPassword {
+            password = pass
+            passwordFound = true
         }
     }
 
@@ -195,11 +243,12 @@ struct ImportCertificateView: View {
 
     private func importCert() {
         guard let p12 = p12Data, let prov = profileData else { return }
+        errorMessage = nil
         Task {
             withAnimation(.easeInOut(duration: 0.2)) {
                 app.activeHUDTitle = L.tr("loading.hud.importingCert")
             }
-            try? await Task.sleep(nanoseconds: 400_000_000)
+            try? await Task.sleep(nanoseconds: 300_000_000)
             defer {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     app.activeHUDTitle = nil
@@ -211,10 +260,9 @@ struct ImportCertificateView: View {
                     profileData: prov,
                     password: password,
                     nickname: nickname,
-                    makeActive: app.certificates.isEmpty
+                    makeActive: !app.certificates.contains(where: { $0.inUse })
                 )
-                app.certificates.append(cert)
-                app.persist()
+                app.addCertificate(cert)
                 dismiss()
             } catch {
                 errorMessage = error.localizedDescription

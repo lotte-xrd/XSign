@@ -39,6 +39,37 @@ struct RootTabView: View {
                 .environmentObject(app)
                 .environmentObject(shop)
         }
+        // Resultado de um arquivo aberto de fora (Arquivos, Safari, "Abrir com").
+        .alert(
+            app.importNotice?.title ?? "",
+            isPresented: Binding(
+                get: { app.importNotice != nil },
+                set: { if !$0 { app.importNotice = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { app.importNotice = nil }
+        } message: {
+            Text(app.importNotice?.message ?? "")
+        }
+        // Certificado aberto de fora sem a senha ou sem o outro arquivo. Fica num
+        // fundo próprio para não disputar com a folha da compra.
+        .background(
+            Color.clear.sheet(item: $app.certificateImportRequest) { request in
+                NavigationStack {
+                    CertificateFilesImportView(
+                        source: .files,
+                        prefilled: request.urls,
+                        onDone: { app.finishCertificateImportRequest(imported: true) }
+                    )
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(L.tr("common.cancel")) { app.finishCertificateImportRequest(imported: false) }
+                        }
+                    }
+                }
+                .environmentObject(app)
+            }
+        )
     }
 }
 

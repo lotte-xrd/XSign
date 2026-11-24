@@ -213,7 +213,7 @@
 "source.error.network" = "No response from the source.";
 "source.error.decode" = "Couldn't read this source's format.";
 "cert.error.password" = "Wrong password for the .p12.";
-"cert.error.mismatch" = "The certificate doesn't match the profile.";
+"cert.error.mismatch" = "The .p12 and the .mobileprovision belong to different certificates. Use the pair that came together.";
 "cert.error.profile" = "Couldn't read the profile.";
 
 /* Additional UI */
@@ -618,3 +618,17 @@
 "shop.cert.expires" = "Expires %@";
 "shop.cert.warranty" = "%d-day warranty, until %@";
 "shop.settings.buy" = "Buy a certificate";
+
+/* Certificados: importação e reconhecimento (1.4.3) */
+"cert.error.missingFiles" = "Couldn't find a .p12 and a .mobileprovision in the chosen files.";
+"cert.error.passwordNeeded" = "Couldn't find the .p12 password. Type it to import.";
+"cert.error.notP12" = "This file isn't a valid .p12 certificate.";
+"cert.error.missingP12" = "The certificate (.p12) is missing. Choose that file too.";
+"cert.error.missingProfile" = "The profile (.mobileprovision) is missing. Choose that file too.";
+"cert.imported" = "Certificate imported: %@";
+"cert.import.needsInput" = "Check the certificate on the import screen.";
+"import.done.title" = "Imported";
+"import.failed.title" = "Couldn't import";
+"certimport.pairOK" = "The .p12 and the profile match";
+"cert.installedWith" = "This XSign was installed with it";
+"cert.serverLinked" = "The .p12 stays on the server, which signs for you";

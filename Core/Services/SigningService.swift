@@ -199,7 +199,7 @@ struct RemoteSigningService: SigningService {
         emitter.log(L.tr("signlog.cert", certificate.nickname, certificate.teamID), .detail)
         emitter.fraction(0.04)
 
-        let isServerMatchedCert = (certificate.p12Path == "SERVER_MATCH")
+        let isServerMatchedCert = certificate.isServerLinked
         let p12Data = isServerMatchedCert ? nil : (try? Data(contentsOf: Paths.resolve(certificate.p12Path)))
         if !isServerMatchedCert && (p12Data == nil || p12Data?.isEmpty == true) {
             emitter.fail(.prepare, L.tr("signlog.error.p12Missing"))

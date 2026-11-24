@@ -28,7 +28,7 @@ struct CertificatesView: View {
                 ForEach(app.certificates) { cert in
                     Section {
                         NavigationLink { CertificateDetailView(cert: cert) } label: {
-                            CertificateCard(cert: cert)
+                            CertificateCard(cert: cert, installed: app.isInstalledCertificate(cert))
                         }
                         .listRowBackground(cert.status == .revoked ? Color.surface.opacity(0.7) : Color.surface)
                     }

@@ -45,6 +45,8 @@ struct CertificateFilesImportView: View {
     var onDone: () -> Void
 
     @State private var showPicker = false
+    /// Tudo o que já foi escolhido: escolher de novo soma (ex.: o .p12 e depois o perfil).
+    @State private var pickedURLs: [URL] = []
     @State private var candidate: CertificateService.CertificateCandidate?
     @State private var password = ""
     @State private var nickname = ""
@@ -98,6 +100,15 @@ struct CertificateFilesImportView: View {
                 if let candidate {
                     statusRow(L.tr("certimport.p12"), candidate.p12Name, ok: candidate.p12Data != nil)
                     statusRow(L.tr("certimport.profile"), candidate.profileName, ok: candidate.profileData != nil)
+                    if candidate.pairMatches == true {
+                        HStack(spacing: 10) {
+                            Image(systemName: "link")
+                                .foregroundStyle(Color.moss)
+                                .frame(width: 22)
+                            Text(L.tr("certimport.pairOK"))
+                                .font(.subheadline)
+                        }
+                    }
                     if candidate.p12Data != nil {
                         HStack(spacing: 10) {
                             Image(systemName: candidate.foundPassword != nil ? "key.fill" : "key")
@@ -185,10 +196,14 @@ struct CertificateFilesImportView: View {
     private func load(_ urls: [URL]) {
         errorMessage = nil
         working = true
+        var all = pickedURLs
+        for url in urls where !all.contains(url) { all.append(url) }
+        pickedURLs = all
         let service = app.certificateService
+        let files = all
         Task {
             let result = await Task.detached(priority: .userInitiated) {
-                service.collectCertificateFiles(urls)
+                service.collectCertificateFiles(files)
             }.value
             withAnimation(.xsignSmooth) {
                 candidate = result
@@ -198,31 +213,32 @@ struct CertificateFilesImportView: View {
                 }
                 if result.p12Data == nil && result.profileData == nil {
                     errorMessage = L.tr("certimport.nothingFound")
+                } else if result.pairMatches == false {
+                    errorMessage = L.tr("cert.error.mismatch")
+                } else if result.p12Unreadable {
+                    errorMessage = L.tr("cert.error.notP12")
+                } else if result.p12Data == nil {
+                    errorMessage = L.tr("cert.error.missingP12")
+                } else if result.profileData == nil {
+                    errorMessage = L.tr("cert.error.missingProfile")
                 }
             }
         }
     }
 
     private func importNow() {
-        guard let c = candidate, let p12 = c.p12Data, let prov = c.profileData else { return }
-        let pass = c.foundPassword ?? password
-        guard app.certificateService.validateP12(data: p12, password: pass) else {
-            withAnimation(.xsignSmooth) { errorMessage = L.tr("certimport.password.wrong") }
-            return
-        }
+        guard let c = candidate, c.isComplete else { return }
+        errorMessage = nil
+        working = true
+        // Senha digitada só quando o XSign não achou sozinho.
+        let typed: String? = c.foundPassword == nil ? password : nil
         do {
-            let cert = try app.certificateService.saveCertificate(
-                p12Data: p12,
-                profileData: prov,
-                password: pass,
-                nickname: nickname,
-                makeActive: app.certificates.isEmpty
-            )
-            app.certificates.append(cert)
-            app.persist()
+            try app.importCertificate(candidate: c, password: typed, nickname: nickname)
+            working = false
             onDone()
         } catch {
-            errorMessage = error.localizedDescription
+            working = false
+            withAnimation(.xsignSmooth) { errorMessage = error.localizedDescription }
         }
     }
 }
